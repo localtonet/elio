@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Elio's own copy of SSH.NET. See README.md in this folder for where it came from and what was changed.
+  -->
+  <PropertyGroup>
+    <AssemblyName>Renci.SshNet</AssemblyName>
+    <RootNamespace>Renci.SshNet</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BouncyCastle.Cryptography" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

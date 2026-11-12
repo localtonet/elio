@@ -1,0 +1,129 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Elio.UI.App">
+  <!--
+    The brushes named Elio* and the theme's own color keys are filled in by ElioStyle.Apply as the app
+    starts, from the one palette in ElioColors. What is here is shape and behavior: sizes, corners, and what
+    each kind of control looks like while the pointer or the keyboard is on it.
+  -->
+  <Application.Styles>
+    <FluentTheme />
+
+    <!-- Every window, menu and tooltip, and the single view a phone shows, start from the same text. -->
+    <Style Selector=":is(TopLevel)">
+      <Setter Property="FontFamily" Value="{DynamicResource ElioFont}" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <!-- Buttons fade between their states rather than jump. -->
+    <Style Selector="Button /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.12" />
+        </Transitions>
+      </Setter>
+    </Style>
+
+    <!-- The button that does what the dialog is for. -->
+    <Style Selector="Button.primary">
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ElioAccentHover}" />
+      <Setter Property="Foreground" Value="{DynamicResource ElioAccentText}" />
+    </Style>
+    <Style Selector="Button.primary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ElioAccentPressed}" />
+      <Setter Property="Foreground" Value="{DynamicResource ElioAccentText}" />
+    </Style>
+    <Style Selector="Button.primary:disabled">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <Style Selector="Button.primary:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ElioAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource ElioAccentText}" />
+    </Style>
+
+    <!-- The button that deletes or overwrites. -->
+    <Style Selector="Button.danger">
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ElioDangerHover}" />
+      <Setter Property="Foreground" Value="{DynamicResource ElioAccentText}" />
+    </Style>
+    <Style Selector="Button.danger:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ElioDangerPressed}" />
+      <Setter Property="Foreground" Value="{DynamicResource ElioAccentText}" />
+    </Style>
+
+    <!-- Icon buttons show nothing but the icon until the pointer is on them. -->
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ElioHover}" />
+    </Style>
+    <Style Selector="Button.icon:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ElioControlPressed}" />
+    </Style>
+    <Style Selector="Button.icon:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="TextBox">
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="9,5,8,5" />
+    </Style>
+    <Style Selector="TextBox /template/ Border#PART_BorderElement">
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+      <Setter Property="BoxShadow" Value="{DynamicResource ElioFocusRing}" />
+    </Style>
+
+    <Style Selector="ComboBox">
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="10,4,0,4" />
+    </Style>
+    <Style Selector="ComboBoxItem">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Margin" Value="4,1" />
+      <Setter Property="Padding" Value="8,5" />
+    </Style>
+
+    <!-- The theme rounds the box as much as a button, which on something this small makes a circle. -->
+    <Style Selector="CheckBox">
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="MinHeight" Value="26" />
+    </Style>
+
+    <Style Selector="ToolTip">
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="Padding" Value="9,6" />
+    </Style>
+
+    <!-- Menus highlight a rounded bar that stops short of the edges, as they do on a Mac. -->
+    <!--
+      The window's frame writes the window's title in its top corner, which is where Elio's own mark and name are.
+      The title itself stays, for the taskbar and the window switcher: only the copy drawn on the window is hidden.
+      Its visibility is set by the frame, so it is made see-through instead.
+    -->
+    <Style Selector="Panel#PART_TitleTextPanel">
+      <Setter Property="Opacity" Value="0" />
+    </Style>
+
+    <!-- A menu takes its pointer from what it was opened on, which over a terminal is the text cursor. -->
+    <Style Selector="ContextMenu">
+      <Setter Property="Cursor" Value="Arrow" />
+      <Setter Property="Padding" Value="5" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="MenuItem">
+      <Setter Property="Cursor" Value="Arrow" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10,6" />
+    </Style>
+  </Application.Styles>
+</Application>

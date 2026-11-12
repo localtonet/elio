@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- CA2255: the module initializer is what keeps every test away from the user's real data folder. -->
+    <NoWarn>$(NoWarn);CA2255</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="ZXing.Net" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Elio.Core\Elio.Core.csproj" />
+    <ProjectReference Include="..\..\src\Elio.Sync\Elio.Sync.csproj" />
+    <ProjectReference Include="..\..\src\Elio.UI\Elio.UI.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The translation files as they are in the repository, for the test that reads each of them. -->
+    <Content Include="..\..\src\Elio.Core\Languages\*.json" Link="Languages\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

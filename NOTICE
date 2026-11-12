@@ -1,0 +1,18 @@
+Elio
+Copyright 2026 The Elio Authors
+
+This product bundles JetBrains Mono, licensed under the SIL Open Font License 1.1
+(src/Elio.UI/Fonts/OFL.txt), and links against libghostty-vt (MIT).
+
+The color themes in src/Elio.Terminal/Themes/schemes.txt come from
+iTerm2-Color-Schemes (https://github.com/mbadolato/iTerm2-Color-Schemes),
+Copyright (c) 2011 to Present Mark Badolato and contributors, MIT License.
+Each theme remains the work of its own author.
+
+vendor/SSH.NET is a modified copy of SSH.NET (https://github.com/sshnet/SSH.NET),
+Copyright (c) Renci, Oleg Kapeljushnik, Gert Driesen, MIT License. The changes are
+listed in vendor/SSH.NET/README.md, and the notices of the work it builds on are in
+vendor/SSH.NET/THIRD-PARTY-NOTICES.TXT.
+
+The Android app reads QR codes with ZXing.Net (https://github.com/micjahn/ZXing.Net),
+Copyright (c) Michael Jahn and the ZXing authors, Apache License 2.0.

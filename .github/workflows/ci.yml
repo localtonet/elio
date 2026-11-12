@@ -1,0 +1,44 @@
+# Builds what a pull request can break: the desktop app, the sync server and the website.
+# The terminal engine comes from native/out in the repository; a release rebuilds it from source.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - run: dotnet build src/Elio.Desktop -c Release
+      - run: dotnet build server/Elio.SyncServer -c Release
+      - run: dotnet build web/Elio.Web -c Release
+
+      - run: dotnet test tests/Elio.Tests -c Release
+
+      # A trimmed publish is where code that trimming would break shows up, as warnings that fail the build.
+      - run: dotnet publish src/Elio.Desktop -c Release -r linux-x64 -o publish
+
+      - name: Known vulnerabilities in packages
+        run: |
+          dotnet list src/Elio.Desktop package --vulnerable --include-transitive | tee vulnerable.txt
+          dotnet list server/Elio.SyncServer package --vulnerable --include-transitive | tee -a vulnerable.txt
+          ! grep -q 'has the following vulnerable packages' vulnerable.txt

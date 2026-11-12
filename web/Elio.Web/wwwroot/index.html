@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Elio: a fast, free, open-source terminal and SSH client</title>
+  <meta name="description" content="Elio is a fast, free and open-source terminal and SSH client for Windows, macOS, Linux, iOS and Android. One native app, end-to-end encrypted sync, no account and no telemetry.">
+  <link rel="canonical" href="https://elio.sh/">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0E1116" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FBFAF7" media="(prefers-color-scheme: light)">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Elio">
+  <meta property="og:title" content="Elio: a fast, free, open-source terminal and SSH client">
+  <meta property="og:description" content="One native app for Windows, macOS, Linux, iOS and Android. End-to-end encrypted sync, no account, no telemetry.">
+  <meta property="og:url" content="https://elio.sh/">
+  <meta property="og:image" content="img/social.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Elio logo, a prompt chevron and a rising sun, with the words: a fast, free and open-source terminal and SSH client.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Elio: a fast, free, open-source terminal and SSH client">
+  <meta name="twitter:description" content="One native app for Windows, macOS, Linux, iOS and Android. End-to-end encrypted sync, no account, no telemetry.">
+  <meta name="twitter:image" content="img/social.png">
+
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="css/site.css">
+  <script src="js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- The icons used on the page, drawn in the same strokes as the logo. -->
+  <svg class="sprite" aria-hidden="true" focusable="false" width="0" height="0">
+    <symbol id="mark" viewBox="0 0 64 64">
+      <path class="mark-line" d="M17 22 27 32 17 42" fill="none" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path class="mark-sun-line" d="M43 19v4M34.500 22.500 37 25M51.500 22.500 49 25" fill="none" stroke-width="3" stroke-linecap="round"/>
+      <path class="mark-sun" d="M34 37a9 9 0 0 1 18 0z"/>
+      <rect class="mark-fill" x="32.500" y="40" width="21" height="4" rx="2"/>
+    </symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5 13.500h6L10.500 21 19 10.500h-6z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.500" width="14" height="9.500" rx="2.500"/><path d="M8.500 10.500V8a3.500 3.500 0 0 1 7 0v2.500M12 14.500v2"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="5.500" cy="12" r="2.500"/><circle cx="18.500" cy="12" r="2.500"/><path d="M8 12h2.500M13.500 12H16M12 4v3M12 17v3M12 10.500v3"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.500"/><path d="m8.500 12.200 2.400 2.400 4.700-5"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4.500" width="18" height="15" rx="3"/><path d="m7.500 9.500 3 2.500-3 2.500M13 15h3.500"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3.500v4M15 3.500v4M6.500 7.500h11V11a5.500 5.500 0 0 1-11 0zM12 16.500v4"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.500" y="4" width="7" height="7" rx="1.800"/><rect x="13.500" y="4" width="7" height="7" rx="1.800"/><rect x="3.500" y="13.500" width="7" height="7" rx="1.800"/><rect x="13.500" y="13.500" width="7" height="7" rx="1.800"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.500 7.500a2 2 0 0 1 2-2h3.600l2 2.300h7.400a2 2 0 0 1 2 2v7.700a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.500"/><circle cx="17.500" cy="6" r="2.500"/><circle cx="17.500" cy="18" r="2.500"/><path d="m8.200 10.800 7-3.600M8.200 13.200l7 3.600"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M4.500 11a7.500 7.500 0 0 1 13.200-4.300L19.500 8.500M19.500 4.500v4h-4M19.500 13a7.500 7.500 0 0 1-13.200 4.300L4.500 15.500M4.500 19.500v-4h4"/></symbol>
+    <symbol id="i-braces" viewBox="0 0 24 24"><path d="M9 4.500c-2 0-3 1-3 2.800v2.200c0 1.400-.8 2.300-2 2.500 1.200.2 2 1.100 2 2.500v2.200c0 1.800 1 2.800 3 2.800M15 4.500c2 0 3 1 3 2.800v2.200c0 1.400.8 2.300 2 2.500-1.200.2-2 1.100-2 2.500v2.200c0 1.800-1 2.800-3 2.800"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.500"/><path d="M3.500 12h17M12 3.500c2.500 2.400 3.700 5.200 3.700 8.500s-1.200 6.100-3.700 8.500c-2.500-2.400-3.700-5.200-3.700-8.500S9.500 5.900 12 3.500z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5.500 12.500 4.200 4.200 8.800-9.400"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4.500v10.500M7.500 11l4.500 4.500 4.500-4.500M5 19.500h14"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8.500 7.500-5 4.500 5 4.500M15.500 7.500l5 4.500-5 4.500"/></symbol>
+    <symbol id="i-window" viewBox="0 0 24 24"><rect x="3.500" y="4.500" width="17" height="15" rx="2.500"/><path d="M3.500 9h17M12 9v10.500"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="10" rx="2"/><path d="M2.500 18.500h19"/></symbol>
+    <symbol id="i-desktop" viewBox="0 0 24 24"><rect x="3.500" y="4.500" width="17" height="11.500" rx="2.500"/><path d="M9 20h6M12 16v4"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.500"/><path d="M10.500 17.500h3"/></symbol>
+    <symbol id="i-phone-notch" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="3"/><path d="M10.500 6h3"/></symbol>
+  </svg>
+
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="#top" aria-label="Elio, back to the top">
+        <svg class="mark" width="30" height="30" aria-hidden="true"><use href="#mark"/></svg>
+        <span class="wordmark">elio</span>
+      </a>
+      <nav class="site-nav" aria-label="Sections">
+        <a href="#why">Why Elio</a>
+        <a href="#features">Features</a>
+        <a href="#security">Security</a>
+        <a href="#open-source">Open source</a>
+        <a href="#download">Download</a>
+      </nav>
+      <a class="button small primary header-cta" href="#download">Download</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="wrap">
+        <p class="hero-brand" aria-hidden="true">
+          <svg class="mark" width="72" height="72"><use href="#mark"/></svg>
+          <span class="wordmark">elio</span><span class="cursor"></span>
+        </p>
+        <h1>A terminal and SSH client that feels instant, on every device you own.</h1>
+        <p class="lead">Elio is one native app for Windows, macOS, Linux, iOS and Android. There is no Electron and no web view inside it: the terminal is drawn straight to the GPU, starts in a fraction of a second and stays responsive while a server floods it with output.</p>
+        <div class="actions">
+          <a class="button primary" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>Download</a>
+          <a class="button" href="{{REPO_URL}}"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>View source</a>
+        </div>
+        <p class="hero-note">Free and open source under Apache-2.0. No account, no paid tier, no telemetry.</p>
+
+        <figure class="shot hero-shot">
+          <picture>
+            <source srcset="img/app-light.webp" media="(prefers-color-scheme: light)" type="image/webp">
+            <img src="img/app-dark.webp" width="1200" height="760" fetchpriority="high" decoding="async"
+                 alt="The Elio window: a server library with Production and Staging groups, local shells and snippets on the left, and one tab split into three terminals on the right.">
+          </picture>
+          <figcaption>Elio on Windows: the server library beside one tab split into three local shells.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" id="why" aria-labelledby="why-title">
+      <div class="wrap">
+        <p class="eyebrow">why elio</p>
+        <h2 id="why-title">Four reasons, none of them a pricing page.</h2>
+        <ul class="reasons">
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-bolt"/></svg>
+            <h3>It feels instant</h3>
+            <p>The terminal engine is libghostty-vt, rendered with Skia and HarfBuzz. Output is pulled from the connection only as fast as the screen can take it, so <code>cat</code> on a huge file never freezes the window and Ctrl+C still answers at once.</p>
+          </li>
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-lock"/></svg>
+            <h3>Sync is free and private</h3>
+            <p>Everything is encrypted on your device before it leaves. The sync server only ever stores ciphertext, and it is open source too: run your own with one Docker command.</p>
+          </li>
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-route"/></svg>
+            <h3>No ports to open</h3>
+            <p>Sign in with a Localtonet account and your devices appear in the sidebar. Connections to them are end to end, even when both sides are behind NAT.</p>
+          </li>
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-open"/></svg>
+            <h3>Nothing is held back</h3>
+            <p>No paid tier inside the app, no account needed to use it, no telemetry.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <p class="eyebrow">features</p>
+        <h2 id="features-title">Everything a day on servers asks for.</h2>
+        <p class="section-lead">The same app, with the same features, on a desktop and on a phone.</p>
+
+        <article class="feature" id="terminal">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>Terminal</h3>
+            <p class="feature-lead">A terminal that keeps up with you, and remembers where you were.</p>
+            <ul class="ticks">
+              <li>Tabs, nested split panes, and tabs you can drag out into their own window without dropping the connection.</li>
+              <li>More than 200 colour themes built in; the terminal can switch between two of them as the system goes light or dark.</li>
+              <li>Search through everything a terminal has printed, history included, as plain text or as a regular expression.</li>
+              <li>Suggestions while you type: commands you ran before on that server appear dimmed after the cursor, and the right arrow takes them.</li>
+              <li>Pictures in the terminal: programs that speak the Kitty graphics protocol show images, plots and animations right in the output.</li>
+              <li>Take a picture of a terminal, or save a pane's output to a file.</li>
+              <li>A command palette, and keyboard shortcuts you can change from inside the app.</li>
+            </ul>
+          </div>
+          <div class="feature-media">
+            <figure class="shot">
+              <picture>
+                <source srcset="img/search-light.webp" media="(prefers-color-scheme: light)" type="image/webp">
+                <img src="img/search-dark.webp" width="944" height="500" loading="lazy" decoding="async"
+                     alt="A terminal listing the files of an OpenSSH folder. The search bar holds a regular expression, shows 1 of 4, and every matching file name is marked.">
+              </picture>
+              <figcaption>Searching a terminal's output with a regular expression.</figcaption>
+            </figure>
+            <figure class="shot">
+              <picture>
+                <source srcset="img/suggestions-light.webp" media="(prefers-color-scheme: light)" type="image/webp">
+                <img src="img/suggestions-dark.webp" width="640" height="270" loading="lazy" decoding="async"
+                     alt="The user has typed git l. The rest of an earlier command is shown dimmed after the cursor, with four choices in a small list below.">
+              </picture>
+              <figcaption>Suggestions from the commands you ran before.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature flip" id="connections">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg>Connections</h3>
+            <p class="feature-lead">SSH done thoroughly, and the other ways into a machine as well.</p>
+            <ul class="ticks">
+              <li><strong>SSH</strong> with passwords, Ed25519, ECDSA and RSA keys, encrypted keys, OpenSSH certificates, the OpenSSH agent and Pageant.</li>
+              <li><strong>FIDO2 security keys</strong>: log in with a key that never leaves the hardware.</li>
+              <li>Any number of <strong>jump hosts</strong>, each verified on its own, or a SOCKS5 or HTTP <strong>proxy</strong>.</li>
+              <li>A <strong>keychain</strong> of identities: a user name with a password or a key, saved once and used on any number of servers. Generate a key and install it on your servers from the same window.</li>
+              <li><strong>Group defaults</strong>: a group says what its servers connect with, and a server uses that wherever it sets nothing of its own.</li>
+              <li><strong>Import</strong> from OpenSSH config, PuTTY, an Ansible inventory, a CSV file, DigitalOcean or AWS EC2.</li>
+              <li>Local, remote and dynamic (SOCKS5) <strong>port forwarding</strong>, <strong>agent forwarding</strong> and <strong>X11 forwarding</strong>.</li>
+              <li><strong>Mosh</strong>: a shell that survives a sleeping laptop and a change of network. Elio speaks the protocol itself; the server needs <code>mosh-server</code>.</li>
+              <li><strong>tmux, natively</strong>: run <code>tmux -CC</code> and its windows become Elio tabs and its panes Elio panes.</li>
+              <li><strong>Local shells</strong>, found automatically, including shells that outlive the window: close Elio and they keep running for the next window to pick up.</li>
+              <li><strong>Docker containers</strong>, <strong>Telnet</strong> and <strong>serial ports</strong>.</li>
+            </ul>
+          </div>
+          <div class="feature-media">
+            <figure class="shot narrow">
+              <img src="img/add-server-dark.webp" width="480" height="650" loading="lazy" decoding="async"
+                   alt="The Add server window: type SSH, a name, an address and port, an identity from the keychain, a user name, an optional private key file, a group and tags.">
+              <figcaption>Adding a server.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature" id="many-servers">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg>Many servers at once</h3>
+            <p class="feature-lead">When one server is not the unit you think in.</p>
+            <ul class="ticks">
+              <li>Drag a server onto a pane to open it beside what is already there, or open a whole group side by side in one tab.</li>
+              <li><strong>Broadcast input</strong>: type once, reach every pane, with a clear warning while it is on.</li>
+              <li>Run a command on many servers and read exit codes and output in one table.</li>
+              <li><strong>Workspaces</strong>: save the window's tabs and splits under a name, and open them again with one click.</li>
+              <li>Snippets for the commands you run often.</li>
+            </ul>
+            <figure class="shot">
+              <picture>
+                <source srcset="img/palette-light.webp" media="(prefers-color-scheme: light)" type="image/webp">
+                <img src="img/palette-dark.webp" width="620" height="500" loading="lazy" decoding="async"
+                     alt="The command palette, listing Split right, Split down, Add server, Open selected side by side, Run a command on several servers, Import servers from OpenSSH, PuTTY, Ansible, CSV, DigitalOcean and AWS, and the workspace commands.">
+              </picture>
+              <figcaption>The command palette.</figcaption>
+            </figure>
+          </div>
+          <div class="feature-media">
+            <figure class="shot">
+              <picture>
+                <source srcset="img/broadcast-light.webp" media="(prefers-color-scheme: light)" type="image/webp">
+                <img src="img/broadcast-dark.webp" width="950" height="760" loading="lazy" decoding="async"
+                     alt="One tab with four terminals. A red bar reads: Broadcast is on, what you type goes to 4 panes at once. The same command has run in all four.">
+              </picture>
+              <figcaption>Broadcast input, shown here with four local shells.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature flip" id="files">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>Files</h3>
+            <p class="feature-lead">Moving files is part of the same window, not another program.</p>
+            <ul class="ticks">
+              <li>A two-pane <strong>SFTP</strong> browser: this computer on one side, the server on the other.</li>
+              <li>A transfer queue with pause, resume, retry, speed and time remaining.</li>
+              <li>Interrupted transfers continue where they stopped, and a half-written file never replaces a good one.</li>
+              <li>Copy from one server straight to another.</li>
+              <li>Drag and drop of files and folders, and editing a remote file in place.</li>
+            </ul>
+          </div>
+          <div class="feature-media">
+            <figure class="mock">
+              <div class="mock-panel files" role="img" aria-label="Illustration of the file browser: this computer in the left pane, the server web-1 in the right pane, and a transfer queue below with one finished and one running transfer.">
+                <span class="mock-tag">Illustration</span>
+                <div class="files-panes" aria-hidden="true">
+                  <div class="files-pane">
+                    <p class="files-head">This computer</p>
+                    <p class="files-path">~/site</p>
+                    <ul>
+                      <li class="dir">assets</li>
+                      <li class="dir">pages</li>
+                      <li class="sel">site.tar.gz</li>
+                      <li>nginx.conf</li>
+                      <li>deploy.sh</li>
+                    </ul>
+                  </div>
+                  <div class="files-pane">
+                    <p class="files-head">web-1</p>
+                    <p class="files-path">/var/www</p>
+                    <ul>
+                      <li class="dir">releases</li>
+                      <li class="dir">shared</li>
+                      <li>current</li>
+                      <li>nginx.conf</li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="files-queue" aria-hidden="true">
+                  <p><span>nginx.conf</span><span class="done">done</span></p>
+                  <p><span>site.tar.gz</span><span>62%</span></p>
+                  <div class="bar"><i></i></div>
+                </div>
+              </div>
+              <figcaption>An illustration of the two-pane file browser and its queue, not a screenshot.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature" id="sharing">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg>Sharing a terminal</h3>
+            <p class="feature-lead">Show someone your screen with a link and a password.</p>
+            <ul class="ticks">
+              <li>Whoever opens the link in their Elio and knows the password sees the same screen live, and can type into it if you allowed that.</li>
+              <li>It travels through the sync server: no port opened on your computer, and no account needed on either side.</li>
+              <li>The stream is encrypted from end to end with a key made from the password, so the server in between carries bytes it cannot read.</li>
+              <li>Sharing ends the moment you stop it.</li>
+            </ul>
+          </div>
+          <div class="feature-media">
+            <figure class="mock">
+              <div class="mock-panel flow" role="img" aria-label="Diagram: your Elio and the viewer's Elio each hold a key made from the password. Between them, the sync server passes along only encrypted bytes.">
+                <span class="mock-tag">Diagram</span>
+                <div class="flow-row" aria-hidden="true">
+                  <div class="node">
+                    <svg class="icon"><use href="#i-terminal"/></svg>
+                    <b>Your Elio</b>
+                    <small>key from the password</small>
+                  </div>
+                  <div class="wire"><span>encrypted</span></div>
+                  <div class="node quiet">
+                    <svg class="icon"><use href="#i-sync"/></svg>
+                    <b>Sync server</b>
+                    <small>sees only ciphertext</small>
+                  </div>
+                  <div class="wire"><span>encrypted</span></div>
+                  <div class="node">
+                    <svg class="icon"><use href="#i-terminal"/></svg>
+                    <b>Their Elio</b>
+                    <small>key from the password</small>
+                  </div>
+                </div>
+              </div>
+              <figcaption>How a shared terminal travels.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature flip" id="sync">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-sync"/></svg>Sync</h3>
+            <p class="feature-lead">Your servers, groups, snippets and known host keys on every device. Passwords too, if you choose.</p>
+            <ul class="ticks">
+              <li>End-to-end encrypted with a key derived from your passphrase with Argon2id. A recovery key protects you from a forgotten passphrase.</li>
+              <li>No account needed: the first device starts sync with a password of your choosing.</li>
+              <li>Adding a device takes a code, not the password: type the one-time code the first device shows, or scan its QR code with a phone. It works once, for ten minutes.</li>
+              <li>Signed in with Localtonet, there is no code to type at all. That sign-in is optional.</li>
+              <li>Changes merge per item, so editing on two devices at once loses nothing.</li>
+              <li>The server is open source: <a href="#self-host">run your own</a>.</li>
+            </ul>
+          </div>
+          <div class="feature-media">
+            <figure class="mock">
+              <div class="mock-panel steps" role="img" aria-label="Illustration of adding a device: the first device shows a one-time code and a QR code, the second device types the code or scans it, and both then hold the same encrypted data.">
+                <span class="mock-tag">Illustration</span>
+                <ol aria-hidden="true">
+                  <li><span class="n">1</span><div><b>First device</b><small>shows a one-time code, and the same thing as a QR code</small><span class="code-chip">K7MQP-2XWHD-9RTB4-C6NVE</span></div></li>
+                  <li><span class="n">2</span><div><b>Second device</b><small>types the code, or scans it with the camera</small></div></li>
+                  <li><span class="n">3</span><div><b>Both</b><small>decrypt on the device; the server keeps ciphertext</small></div></li>
+                </ol>
+              </div>
+              <figcaption>Adding a device. The code shown is an example.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature" id="plugins">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-braces"/></svg>Plugins and AI tools</h3>
+            <p class="feature-lead">Extend Elio in any language, and let your AI tools see your servers without seeing your secrets.</p>
+            <ul class="ticks">
+              <li>A plugin is any program that speaks a few JSON messages on its standard input and output.</li>
+              <li>It adds commands to the palette. When one runs it can type into the terminal, ask a question, show a note, copy text or open a web page.</li>
+              <li>Plugins never see passwords or keys.</li>
+              <li>Elio is also a Model Context Protocol server. Point an AI tool at <code>elio --mcp</code> and it can see the servers you have saved, without ever seeing a password or a key.</li>
+              <li>If you turn it on in Settings and on the server, it can also run commands over SSH, limited to servers you have already connected to yourself.</li>
+              <li>You see what it does: every command an AI tool runs appears in a column beside your terminals, with its exit code and what it printed.</li>
+            </ul>
+          </div>
+          <div class="feature-media">
+            <figure class="term">
+              <figcaption class="term-title">plugin.json</figcaption>
+<pre><code>{
+  <span class="k">"name"</span>: <span class="s">"example"</span>,
+  <span class="k">"description"</span>: <span class="s">"Types the date command into the terminal and says so."</span>,
+  <span class="k">"version"</span>: <span class="s">"1.0.0"</span>,
+  <span class="k">"command"</span>: <span class="s">"python"</span>,
+  <span class="k">"args"</span>: [<span class="s">"plugin.py"</span>]
+}</code></pre>
+            </figure>
+            <figure class="term">
+              <figcaption class="term-title">The command an AI tool starts</figcaption>
+<pre><code><span class="p">$</span> elio --mcp</code></pre>
+            </figure>
+            <figure class="shot">
+              <img src="img/ai-tools-dark.webp" width="1200" height="760" loading="lazy" decoding="async"
+                   alt="The AI tools column beside a terminal: four commands with the time and the server, three of them with their exit code, duration and what they printed. One failed and is shown in red, and the last is still running.">
+              <figcaption>What AI tools ran, and what it printed.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="feature flip" id="platforms">
+          <div class="feature-text">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Languages and platforms</h3>
+            <p class="feature-lead">Twenty languages, five platforms, one app.</p>
+            <ul class="ticks">
+              <li>Elio follows the language of the operating system, and it can be changed in Settings.</li>
+              <li>On Android and iOS the layout is made for a small screen: the terminal fills it, the server list slides in from the side, and a row of keys above the keyboard adds Esc, Tab, Ctrl, Alt, the arrows and the symbols a shell needs.</li>
+              <li>On a phone Elio can be locked behind the device's fingerprint, face or passcode, and its camera reads the QR code that adds it to sync.</li>
+              <li>Portable mode: create a folder named <code>data</code> beside the program and Elio keeps everything in it.</li>
+            </ul>
+          </div>
+          <div class="feature-media">
+            <div class="panel">
+              <p class="panel-title">The interface is available in</p>
+              <ul class="chips">
+                <li>Arabic</li><li>Bengali</li><li>Chinese (Simplified)</li><li>Dutch</li><li>English</li><li>French</li><li>German</li><li>Hindi</li><li>Indonesian</li><li>Italian</li><li>Japanese</li><li>Korean</li><li>Persian</li><li>Polish</li><li>Portuguese</li><li>Russian</li><li>Spanish</li><li>Turkish</li><li>Ukrainian</li><li>Vietnamese</li>
+              </ul>
+              <p class="panel-title">It runs on</p>
+              <ul class="chips strong">
+                <li>Windows</li><li>macOS</li><li>Linux</li><li>iOS</li><li>Android</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section tinted" id="security" aria-labelledby="security-title">
+      <div class="wrap">
+        <p class="eyebrow">security</p>
+        <h2 id="security-title">What Elio does with your secrets, plainly.</h2>
+        <ul class="security">
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>An encrypted vault</h3><p>Passwords and passphrases live in a vault encrypted with AES-GCM. Its key is kept by the operating system's own key store.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>Windows Hello, if you want it</h3><p>On Windows the vault can also be put behind Windows Hello, so saved passwords are only used after a fingerprint, a face or a PIN.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>Sync the server cannot read</h3><p>Sync is end-to-end encrypted. The server cannot read what it stores, and without the passphrase or the recovery key nobody can.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>Host keys are pinned</h3><p>A server's key is pinned on first use. If it ever changes, Elio stops and asks before sending anything.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>End to end to your devices</h3><p>Connections to Localtonet devices go end to end, and the device's key is checked against the one recorded when it was paired.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>A sign-in that cannot open a shell</h3><p>The key Elio receives from Localtonet can only list devices and prove your identity to the sync server. It can be revoked from your Localtonet account at any time.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>Shells need their own approval</h3><p>Opening a shell on a device takes that device's access key, or your approval in the browser. Access keys stay in the vault on your computer and can be revoked from each device's page.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>AI tools on a short lead</h3><p>An AI tool never receives a password or a key. It can run commands only where you allowed it twice, in Settings and on the server, and every command it runs is shown in the window and written to a log.</p></div></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><div><h3>No telemetry</h3><p>Elio does not report on you. Passwords and keys are never written to logs.</p></div></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="open-source" aria-labelledby="open-title">
+      <div class="wrap">
+        <p class="eyebrow">open source</p>
+        <h2 id="open-title">Read it, build it, run your own.</h2>
+        <p class="section-lead">Elio is licensed under the Apache License 2.0: the app, and the sync server with it.</p>
+
+        <div class="open-grid">
+          <div class="open-block" id="self-host">
+            <h3>Run your own sync server</h3>
+            <p>The server stores only encrypted data in SQLite; the key that decrypts it never reaches it. From the repository root, build the image once:</p>
+            <figure class="term">
+              <figcaption class="term-title">Build</figcaption>
+<pre><code><span class="p">$</span> docker build -f server/Elio.SyncServer/Dockerfile -t elio-sync .</code></pre>
+            </figure>
+            <p>Then it is one command:</p>
+            <figure class="term">
+              <figcaption class="term-title">Run</figcaption>
+<pre><code><span class="p">$</span> docker run -d -p 8080:8080 -v elio-sync:/data -e Sync__PublicUrl=https://sync.example.com elio-sync</code></pre>
+            </figure>
+            <p class="fine">The container listens on plain HTTP on port 8080, so put a reverse proxy with HTTPS in front of it, then enter the server's address in Elio's Sync window. The repository's README lists every setting.</p>
+          </div>
+
+          <div class="open-block" id="build">
+            <h3>Build from source</h3>
+            <p>Elio targets .NET 10. With the terminal engine built, the desktop app is one line:</p>
+            <figure class="term">
+              <figcaption class="term-title">Run the desktop app</figcaption>
+<pre><code><span class="p">$</span> dotnet run --project src/Elio.Desktop</code></pre>
+            </figure>
+            <p class="fine">The terminal engine, libghostty-vt, is built from source by <code>build/native.sh</code>, which pins every version and checks every download against its SHA-256. The README has the steps.</p>
+            <p><a class="button" href="{{REPO_URL}}"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>View source</a></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section tinted" id="download" aria-labelledby="download-title">
+      <div class="wrap">
+        <p class="eyebrow">download</p>
+        <h2 id="download-title">Get Elio.</h2>
+        <p class="section-lead">Builds are published on the releases page. Pick your platform there; every one of them is free.</p>
+        <ul class="platforms">
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-window"/></svg>
+            <h3>Windows</h3>
+            <p>Desktop</p>
+            <a class="button primary" href="{{RELEASES_URL}}">Download<span class="visually-hidden"> for Windows</span></a>
+          </li>
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-laptop"/></svg>
+            <h3>macOS</h3>
+            <p>Desktop</p>
+            <a class="button primary" href="{{RELEASES_URL}}">Download<span class="visually-hidden"> for macOS</span></a>
+          </li>
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-desktop"/></svg>
+            <h3>Linux</h3>
+            <p>Desktop</p>
+            <a class="button primary" href="{{RELEASES_URL}}">Download<span class="visually-hidden"> for Linux</span></a>
+          </li>
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-phone"/></svg>
+            <h3>Android</h3>
+            <p>Phone</p>
+            <a class="button primary" href="{{RELEASES_URL}}">Download<span class="visually-hidden"> for Android</span></a>
+          </li>
+          <li class="card">
+            <svg class="icon big" aria-hidden="true"><use href="#i-phone-notch"/></svg>
+            <h3>iOS</h3>
+            <p>Phone</p>
+            <a class="button primary" href="{{RELEASES_URL}}">Download<span class="visually-hidden"> for iOS</span></a>
+          </li>
+        </ul>
+        <p class="fine center">Prefer to build it yourself? <a href="#build">Build from source</a>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-row">
+      <div class="footer-brand">
+        <a class="brand" href="#top" aria-label="Elio, back to the top">
+          <svg class="mark" width="30" height="30" aria-hidden="true"><use href="#mark"/></svg>
+          <span class="wordmark">elio</span>
+        </a>
+        <p>A fast, free and open-source terminal and SSH client.</p>
+        <p>Licensed under the Apache License 2.0.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="{{REPO_URL}}">Source</a>
+        <a href="#self-host">Sync server docs</a>
+        <a href="{{RELEASES_URL}}">Releases</a>
+      </nav>
+      <div class="footer-note">
+        <p>Elio works on its own; <a href="https://localtonet.com" rel="noopener">Localtonet</a> adds reaching computers behind a router.</p>
+        <p>No tracking on this site.</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

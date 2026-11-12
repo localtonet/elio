@@ -1,0 +1,7 @@
+{
+  "name": "example",
+  "description": "Types the date command into the terminal and says so.",
+  "version": "1.0.0",
+  "command": "python",
+  "args": ["plugin.py"]
+}

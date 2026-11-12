@@ -1,0 +1,257 @@
+# Builds Elio for Windows, Linux, macOS and Android and publishes a GitHub release.
+#
+# Push a tag such as v1.2.3 to release. A tag with a hyphen (v1.2.3-beta.1) is published as a pre-release.
+# Running the workflow by hand builds everything and keeps the files as workflow artifacts, without a release.
+#
+# The Android package is signed with the release key when these repository secrets exist, and with a
+# throwaway debug key otherwise (such a package installs, but cannot be updated by a later build):
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to stamp on the build, without the leading v
+        default: 0.0.0-dev
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_VERSION: 10.0.x
+  RAW_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+
+jobs:
+  # libghostty-vt, built from pinned and checksummed sources rather than taken from the repository.
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for Windows and Linux
+        run: sh build/native.sh win-x64 linux-x64 linux-arm64
+
+      # Kept apart so that trouble with the NDK costs the Android package, not the desktop builds.
+      - name: Build for Android
+        continue-on-error: true
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" sh build/native.sh android-arm64 android-arm android-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native
+          path: native/out
+          if-no-files-found: error
+          retention-days: 3
+
+  desktop:
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: linux-arm64
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native
+          path: native/out
+
+      - name: Publish
+        run: dotnet publish src/Elio.Desktop -c Release -r ${{ matrix.rid }} -p:Version="${RAW_VERSION#v}" -o publish
+
+      - name: Package
+        run: |
+          version=${RAW_VERSION#v}
+          name=elio-$version-${{ matrix.rid }}
+          mkdir "$name" dist
+          cp LICENSE NOTICE "$name/"
+          if [ "${{ matrix.rid }}" = win-x64 ]; then
+            cp publish/elio.exe "$name/"
+            7z a -tzip "dist/$name.zip" "$name" > /dev/null
+          else
+            cp publish/elio "$name/"
+            chmod +x "$name/elio"
+            tar -czf "dist/$name.tar.gz" "$name"
+            sh build/package-deb.sh "$version" ${{ matrix.rid }} publish dist
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+
+  # macOS is built on a Mac from start to finish: the engine needs Apple's SDK to link, and the app has to be
+  # put in a bundle and signed there. Without the signing secrets the bundle gets an ad-hoc signature, which
+  # opens only after the user allows it in System Settings.
+  #   MACOS_CERTIFICATE_BASE64 (a "Developer ID Application" certificate as .p12), MACOS_CERTIFICATE_PASSWORD,
+  #   MACOS_SIGN_IDENTITY ("Developer ID Application: Name (TEAMID)"),
+  #   and to notarize: MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_PASSWORD (an app-specific password), MACOS_NOTARY_TEAM_ID
+  macos:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build the terminal engine
+        run: sh build/native-apple.sh ${{ matrix.rid }}
+
+      - name: Publish
+        run: dotnet publish src/Elio.Desktop -c Release -r ${{ matrix.rid }} -p:Version="${RAW_VERSION#v}" -o publish
+
+      - name: Import the signing certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$CERTIFICATE_BASE64" ]; then
+            echo "::warning::No Developer ID certificate is configured, so the app is signed ad hoc."
+            exit 0
+          fi
+          keychain=$RUNNER_TEMP/elio.keychain-db
+          password=$(uuidgen)
+          echo "$CERTIFICATE_BASE64" | base64 -d > "$RUNNER_TEMP/elio.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/elio.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/elio.p12"
+
+      - name: Package
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: sh build/package-macos.sh "${RAW_VERSION#v}" ${{ matrix.rid }} publish dist
+
+      - name: Notarize
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          if [ -z "$NOTARY_APPLE_ID" ]; then
+            echo "::warning::No notarization account is configured, so macOS will warn before opening the app."
+            exit 0
+          fi
+          xcrun notarytool submit dist/*.zip --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID" --wait
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+
+  android:
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native
+          path: native/out
+
+      - name: Check the terminal engine was built
+        run: |
+          for abi in android-arm64 android-arm android-x64; do
+            test -f "native/out/$abi/lib/libghostty-vt.so" || { echo "::error::libghostty-vt was not built for $abi"; exit 1; }
+          done
+
+      - run: dotnet workload install android
+
+      - name: Publish
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          version=${RAW_VERSION#v}
+          signing=()
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/elio.keystore"
+            signing=(-p:AndroidKeyStore=true "-p:AndroidSigningKeyStore=$RUNNER_TEMP/elio.keystore"
+                     "-p:AndroidSigningKeyAlias=$KEY_ALIAS" -p:AndroidSigningStorePass=env:KEYSTORE_PASSWORD
+                     -p:AndroidSigningKeyPass=env:KEY_PASSWORD)
+          else
+            echo "::warning::No release keystore is configured, so the package is signed with a debug key."
+          fi
+          dotnet publish src/Elio.Android -c Release -p:Version="$version" -p:ApplicationDisplayVersion="$version" \
+            -p:ApplicationVersion="$GITHUB_RUN_NUMBER" "${signing[@]}" -o publish
+          mkdir dist
+          cp publish/*-Signed.apk "dist/elio-$version-android.apk"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [desktop, macos, android]
+    # A failed Android or macOS build still lets the Windows and Linux builds out.
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.desktop.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Elio ${GITHUB_REF_NAME#v}" --generate-notes "${flags[@]}"

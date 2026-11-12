@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page not found · Elio</title>
+  <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="dark light">
+  <!-- Everything is in this one file, so the page looks right whatever address it is shown for. -->
+  <style>
+    :root { color-scheme: dark; --bg: #0E1116; --panel: #161A21; --text: #F1EFE8; --muted: #969BA6; --accent: #FFB020; --fill: #FFB020; --on: #0E1116; --line: rgba(255,255,255,.16); }
+    @media (prefers-color-scheme: light) {
+      :root { color-scheme: light; --bg: #FBFAF7; --panel: #F1EFE8; --text: #14171C; --muted: #575D68; --accent: #E89A00; --fill: #F0A000; --on: #14171C; --line: rgba(20,23,28,.2); }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+      background: var(--bg); color: var(--text);
+      font: 400 1rem/1.6 "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, "Helvetica Neue", Ubuntu, sans-serif;
+    }
+    main { width: 100%; max-width: 520px; }
+    .term { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 20px; margin: 28px 0;
+      font: 400 .9375rem/1.7 "JetBrains Mono", "Cascadia Mono", Consolas, Menlo, "DejaVu Sans Mono", monospace; overflow-x: auto; }
+    .term b { color: var(--accent); font-weight: 700; }
+    .term span { color: var(--muted); }
+    h1 { margin: 20px 0 0; font-size: 2rem; line-height: 1.15; letter-spacing: -.02em; }
+    p { margin: 12px 0 0; color: var(--muted); }
+    a.button { display: inline-flex; align-items: center; min-height: 46px; padding: 10px 20px; border-radius: 10px;
+      background: var(--fill); color: var(--on); font-weight: 600; text-decoration: none; }
+    a.button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    .line { stroke: var(--text); } .fill { fill: var(--text); } .sun-line { stroke: var(--accent); } .sun { fill: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <svg width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Elio">
+      <path class="line" d="M17 22 27 32 17 42" fill="none" stroke-width="5.200" stroke-linecap="round" stroke-linejoin="round"/>
+      <path class="sun-line" d="M43 19v4M34.500 22.500 37 25M51.500 22.500 49 25" fill="none" stroke-width="3" stroke-linecap="round"/>
+      <path class="sun" d="M34 37a9 9 0 0 1 18 0z"/>
+      <rect class="fill" x="32.500" y="40" width="21" height="4" rx="2"/>
+    </svg>
+    <h1>There is nothing at this address.</h1>
+    <p>The page may have moved, or the link may be mistyped.</p>
+    <div class="term" aria-hidden="true"><b>&gt;</b> cd this-page<br><span>No such file or directory</span></div>
+    <a class="button" href="./">Back to the start</a>
+  </main>
+</body>
+</html>

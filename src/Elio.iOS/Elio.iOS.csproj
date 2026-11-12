@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
+    <NativeOut>$(MSBuildThisFileDirectory)..\..\native\out\</NativeOut>
+    <!-- Trimming is always on for iOS, and two libraries Elio does not write are not fully annotated for it.
+         That is theirs to say and stays a warning; in Elio's own code a trimming problem still stops the build. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104</WarningsNotAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.iOS" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Elio.UI\Elio.UI.csproj" />
+    <ProjectReference Include="..\Elio.Core\Elio.Core.csproj" />
+  </ItemGroup>
+  <!--
+    The terminal engine, built on a Mac by "sh build/native-apple.sh ios". An iPhone app cannot load a library
+    of its own at run time, so the engine is linked into the program, for a device and for the simulator alike.
+  -->
+  <PropertyGroup>
+    <!-- The library inside the framework is named by hand, one for the simulator and one for a device: given the
+         framework as a whole, the build took it without a word and linked nothing. -->
+    <ElioEngineSlice>ios-arm64</ElioEngineSlice>
+    <ElioEngineSlice Condition="$(RuntimeIdentifier.StartsWith('iossimulator'))">ios-arm64-simulator</ElioEngineSlice>
+    <ElioEngine>$(NativeOut)ios\ghostty-vt.xcframework\$(ElioEngineSlice)\libghostty-vt-fat.a</ElioEngine>
+  </PropertyGroup>
+  <ItemGroup>
+    <NativeReference Include="$(ElioEngine)" Kind="Static" ForceLoad="true" IsCxx="true" Condition="Exists('$(ElioEngine)')" />
+  </ItemGroup>
+  <!--
+    Nothing in the program calls the engine by name: Elio.Terminal looks its functions up in the running
+    program when it first needs them. An iPhone app only lets the names be found that the build lists as
+    exported, and drops code nothing refers to, so the engine's functions are added to that list.
+  -->
+  <PropertyGroup Condition="Exists('$(ElioEngine)')">
+    <AppBundleExtraOptions>$(AppBundleExtraOptions) --gcc_flags "-Wl,-exported_symbol,_ghostty_*"</AppBundleExtraOptions>
+    <!-- A release build strips every name it did not list itself, the engine's with them, and then nothing is found by name. -->
+    <NoSymbolStrip>true</NoSymbolStrip>
+  </PropertyGroup>
+  <!-- Elio.Terminal brings the engine as built for the desktop systems along. None of those belongs in an iPhone app. -->
+  <Target Name="ElioDropDesktopEngines" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <_ElioDesktopEngine Include="@(ResolvedFileToPublish)" Condition="'%(Filename)' == 'ghostty-vt' or '%(Filename)' == 'libghostty-vt'" />
+      <ResolvedFileToPublish Remove="@(_ElioDesktopEngine)" />
+    </ItemGroup>
+  </Target>
+</Project>

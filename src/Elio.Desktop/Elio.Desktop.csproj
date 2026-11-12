@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>elio</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>elio.ico</ApplicationIcon>
+    <!-- A single-file publish carries the native libraries (Skia, HarfBuzz, ANGLE, ghostty-vt) inside the exe. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <!--
+    Not on macOS: there the app is a bundle (build/package-macos.sh), the libraries lie beside the program inside
+    it, and they have to be files of their own to be signed. Libraries unpacked at start would be unsigned.
+  -->
+  <PropertyGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <!--
+    A publish for one runtime ("dotnet publish src/Elio.Desktop -c Release -r win-x64") gives a single file that
+    needs no .NET on the machine. Trimming and compression keep it near 25 MB; ReadyToRun would start a little
+    faster for about 15 MB more. An ahead-of-time build (-p:PublishAot=true) makes its own choices.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != '' and '$(PublishAot)' != 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+  <!--
+    Elio.Terminal ships ghostty-vt under runtimes/<rid>/native for every platform it was built for. A publish
+    for one runtime keeps only that runtime's library and puts it beside the exe, where a single-file bundle
+    picks it up and the loader finds it after extraction. Marking it as a native asset is what lets the bundle
+    take a library that is not a .dll.
+  -->
+  <Target Name="ElioTidyPublish" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <_ElioGhostty Include="@(ResolvedFileToPublish)" Condition="'%(Filename)' == 'ghostty-vt' or '%(Filename)' == 'libghostty-vt'" />
+      <ResolvedFileToPublish Remove="@(_ElioGhostty)" />
+      <ResolvedFileToPublish Include="@(_ElioGhostty)" Condition="$([System.String]::Copy('%(RelativePath)').Replace('\', '/').Contains('runtimes/$(RuntimeIdentifier)/native/'))" RelativePath="%(Filename)%(Extension)" AssetType="native" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(PublishSingleFile)' == 'true'">
+      <_ElioSymbols Include="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+      <ResolvedFileToPublish Remove="@(_ElioSymbols)" />
+    </ItemGroup>
+  </Target>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Elio.UI\Elio.UI.csproj" />
+    <ProjectReference Include="..\Elio.Connections\Elio.Connections.csproj" />
+  </ItemGroup>
+</Project>
