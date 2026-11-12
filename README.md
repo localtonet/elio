@@ -1,4 +1,6 @@
-# Elio
+<p align="center"><img src="docs/icon.svg" width="96" height="96" alt="The Elio icon"></p>
+
+<h1 align="center">Elio</h1>
 
 **A fast, free and open-source terminal and SSH client for Windows, macOS, Linux, iOS and Android.**
 
@@ -30,7 +32,7 @@ Website: [elio.sh](https://elio.sh)
 
 ## Getting started
 
-**Get Elio.** Builds for each platform are published on the repository's releases page. To build it yourself, see [Building from source](#building-from-source).
+**Get Elio.** Builds for Windows, macOS, Linux and Android are on the [releases page](https://github.com/localtonet/elio/releases/latest), each with its SHA-256 in `SHA256SUMS`. There is no build for iOS there yet: it has to be built and signed with your own Apple account. To build it yourself, see [Building from source](#building-from-source).
 
 **First run.** The window opens with the server list on the left and four ways to begin in the middle: **Local shell**, **Add server**, **Import OpenSSH config** and **Command palette**.
 

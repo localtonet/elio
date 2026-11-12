@@ -241,6 +241,17 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # The website links to releases/latest/download/<name>, which only keeps working while the names do not
+      # change from one release to the next. The version stays in the tag, in the title and inside each package.
+      - name: Names without the version
+        working-directory: dist
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          for file in elio-"$version"-*; do
+            mv "$file" "elio-${file#elio-"$version"-}"
+          done
+          ls -l
+
       - name: Checksums
         working-directory: dist
         run: |

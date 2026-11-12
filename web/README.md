@@ -21,14 +21,13 @@ addresses that do not exist, point it at `404.html`.
 
 All links inside the site are relative, so it also works from a sub-folder.
 
-## Before the first upload: fill in two placeholders
+## Links to the repository and the downloads
 
-| Placeholder | Replace with | Where |
-| --- | --- | --- |
-| `{{REPO_URL}}` | The address of the source repository | `wwwroot/index.html`, 3 places |
-| `{{RELEASES_URL}}` | The page the builds are published on | `wwwroot/index.html`, 6 places |
-
-Search and replace both in `index.html`; until then those buttons lead nowhere.
+The page links to the source at `https://github.com/localtonet/elio` and to the newest builds at
+`https://github.com/localtonet/elio/releases/latest/download/<name>`. Those download links work because the release workflow gives
+every file a name without the version in it (`elio-win-x64.zip`, `elio-osx-arm64.zip`, `elio-linux-x64.deb`,
+`elio-android.apk` and so on). If a file is renamed in `.github/workflows/release.yml`, change it in
+`wwwroot/index.html` too. If the repository moves, search and replace its address there.
 
 Two more things to know:
 

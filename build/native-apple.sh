@@ -19,7 +19,9 @@ esac
 
 ROOT=$(pwd)/native
 DOWNLOADS=$ROOT/downloads
-WORK=$(mktemp -d)
+# The physical path: on macOS the temporary folder is reached through a link (/var is /private/var), and Zig,
+# which works out relative paths between this folder and its cache, loses its way when the two are named differently.
+WORK=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$DOWNLOADS" "$ROOT/out"
 

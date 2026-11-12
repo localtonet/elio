@@ -345,9 +345,10 @@ p code, li code {
 
 /* Download */
 .platforms { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 48px; }
-.platforms .card { display: grid; justify-items: start; }
+.platforms .card { display: grid; justify-items: start; align-content: start; }
 .platforms .card p { margin-bottom: 20px; }
 .platforms .button { width: 100%; }
+.platforms .card p.alt { margin: 12px 0 0; font-size: .8438rem; }
 
 /* Footer */
 .site-footer { padding: 48px 0 56px; border-top: 1px solid var(--line); font-size: .9375rem; color: var(--muted); }
