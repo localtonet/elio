@@ -26,7 +26,7 @@ public static class L
     private const string NamesFile = "_names";
 
     // Written from right to left, so the layout is mirrored for them.
-    private static readonly string[] RightToLeftCodes = ["ar", "fa"];
+    private static readonly string[] RightToLeftCodes = ["ar", "fa", "he", "ur"];
 
     /// <summary>Every language that has a translation file, English first, each under its own name.</summary>
     public static IReadOnlyList<Language> Languages { get; } = LoadLanguages();

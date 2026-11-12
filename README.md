@@ -246,7 +246,7 @@ Each plugin is a folder with a `plugin.json` in it, inside `plugins` in Elio's d
 
 ### Languages
 
-The interface is available in 20 languages: Arabic, Bengali, Chinese (Simplified), Dutch, English, French, German, Hindi, Indonesian, Italian, Japanese, Korean, Persian, Polish, Portuguese, Russian, Spanish, Turkish, Ukrainian and Vietnamese. Elio follows the language of the operating system, and it can be changed in Settings.
+The interface is available in 30 languages: Arabic, Bengali, Chinese (Simplified), Czech, Dutch, English, French, German, Greek, Hebrew, Hindi, Indonesian, Italian, Japanese, Korean, Marathi, Persian, Polish, Portuguese, Romanian, Russian, Spanish, Swahili, Swedish, Tamil, Telugu, Turkish, Ukrainian, Urdu and Vietnamese. Elio follows the language of the operating system, and it can be changed in Settings.
 
 ### On a phone
 
