@@ -415,6 +415,12 @@ public sealed class AppSettings : IVersionedFile
     /// <summary>How the find bar reads what is typed into it: as plain text, or as a regular expression.</summary>
     public bool FindWithRegex { get; set; }
 
+    /// <summary>How the search bar of the file lists reads what is typed into it: as part of a name or a pattern, or as a regular expression.</summary>
+    public bool FileFilterWithRegex { get; set; }
+
+    /// <summary>Whether the file lists leave out hidden files and folders: names that start with a dot, and files marked hidden on Windows.</summary>
+    public bool HideHiddenFiles { get; set; }
+
     /// <summary>
     /// Whether commands typed before are offered again while typing. On unless turned off; it has a name of its own
     /// because an earlier setting for the same thing was off unless turned on, and files saved then still say so.

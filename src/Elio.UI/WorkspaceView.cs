@@ -75,7 +75,7 @@ public sealed class FilesPane : ContentPane
         Frame = MakeFrame(view, ElioColors.Chrome);
     }
 
-    internal override void FocusContent() => View.Focus();
+    internal override void FocusContent() => View.FocusContents();
 
     internal override Task ShutAsync() => View.CloseAsync();
 }
@@ -1145,7 +1145,12 @@ public sealed partial class WorkspaceView : UserControl
     }
 
     /// <summary>Opens the search bar of the current pane.</summary>
-    public void FindInActive() => _current?.ActiveTerminal?.ShowFind();
+    public void FindInActive()
+    {
+        // A file pane has no output to look through, and what the same key does there is search the folder.
+        if (_current?.Active is FilesPane files) files.View.ShowFind();
+        else _current?.ActiveTerminal?.ShowFind();
+    }
 
     /// <summary>Sends typing in the current tab to all of its panes, or stops doing that.</summary>
     public void ToggleBroadcast()

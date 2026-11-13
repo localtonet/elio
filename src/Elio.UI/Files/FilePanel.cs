@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -8,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Elio.Core;
 
@@ -19,6 +21,9 @@ public sealed class FilePanel : UserControl
     public static readonly DataFormat<FileRow[]> RowsFormat = DataFormat.CreateInProcessFormat<FileRow[]>("elio-file-rows");
 
     private const double DragStartDistance = 6;
+
+    // Typing makes a burst of changes, and the list is only made again when it has paused.
+    private static readonly TimeSpan TypingDelay = TimeSpan.FromMilliseconds(120);
     private const string FullColumns = "20,*,86,130,84";
     private const string MediumColumns = "20,*,76,0,0";
     private const string NarrowColumns = "20,*,0,0,0";
@@ -33,8 +38,23 @@ public sealed class FilePanel : UserControl
     private readonly TextBox _path;
     private readonly TextBlock _status = new() { FontSize = 11, Foreground = ElioColors.TextMuted, TextTrimming = TextTrimming.CharacterEllipsis, Tag = "panel-status" };
     private readonly Grid _header;
+    private readonly Dictionary<string, (TextBlock Label, string Text)> _headerLabels = [];
+    private readonly FileFindBar _find;
+    private readonly SubfolderSearch _deep;
+    private readonly Button _hiddenButton;
+    private readonly TypeAhead _typeAhead = new();
     private string _columns = FullColumns;
+
+    // Everything in the folder, and the part of it the list shows: what is left once hidden files and the search are through.
     private List<FileRow> _rows = [];
+    private List<FileRow> _shown = [];
+    private List<string> _shownNames = [];
+    private FileFilter _applied = FileFilter.None;
+    private int _candidates;
+    private bool _hideHidden;
+    private bool _quiet;
+    private HashSet<string>? _restore;
+    private CancellationTokenSource? _viewing;
     private CancellationTokenSource? _listing;
     private Comparison<FileRow> _sort = (a, b) => StringComparer.CurrentCultureIgnoreCase.Compare(a.Name, b.Name);
     private string _sortKey = "name";
@@ -56,12 +76,27 @@ public sealed class FilePanel : UserControl
         _dialogs = dialogs;
         _transferLabel = transferLabel;
 
+        _hideHidden = AppServices.Settings.HideHiddenFiles;
+        _deep = new SubfolderSearch(source, OnSubfolderResults);
+
+        // So that the keys of the panel have somewhere to stay when there is no row to hold the keyboard.
+        Focusable = true;
+
         _path = new TextBox { FontSize = 12, MinHeight = 28, Padding = new Thickness(8, 4), Tag = "panel-path" };
         _path.KeyDown += (_, e) =>
         {
-            if (e.Key != Key.Enter) return;
-            e.Handled = true;
-            _ = NavigateAsync(_path.Text?.Trim() ?? string.Empty);
+            if (e.Key == Key.Escape)
+            {
+                // Back to where the list is, giving up what was typed.
+                e.Handled = true;
+                _path.Text = CurrentPath;
+                FocusList();
+            }
+            else if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                _ = NavigateAsync(_path.Text?.Trim() ?? string.Empty);
+            }
         };
 
         Button up = ToolButton(ElioStyle.IconUp, L.T("Parent folder"), "panel-up");
@@ -70,10 +105,21 @@ public sealed class FilePanel : UserControl
         refresh.Click += (_, _) => _ = RefreshAsync();
         Button newFolder = ToolButton(ElioStyle.IconFolderPlus, L.T("New folder"), "panel-new-folder");
         newFolder.Click += (_, _) => _ = NewFolderAsync();
+        Button find = ToolButton(ElioStyle.IconSearch, L.T("Search this folder ({0})", PrimaryKey + "+F"), "panel-find");
+        find.Click += (_, _) => ShowFind();
+        _hiddenButton = ToolButton(ElioStyle.IconEye, L.T("Hide hidden files: on / off ({0})", HiddenKeys), "panel-hidden");
+        _hiddenButton.Click += (_, _) => ToggleHidden();
+        MarkHiddenButton();
+
+        _find = new FileFindBar(AppServices.Settings.FileFilterWithRegex);
+        _find.Changed += OnFindChanged;
+        _find.Accepted += () => _ = AcceptFindAsync();
+        _find.Closed += () => _ = CloseFindAsync();
+        _find.Moved += MoveSelection;
 
         var tools = new DockPanel { Margin = new Thickness(8, 8, 8, 4) };
         tools.Children.Add(Docked(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 0, 6, 0), Children = { up, refresh } }, Dock.Left));
-        tools.Children.Add(Docked(new Border { Margin = new Thickness(4, 0, 0, 0), Child = newFolder }, Dock.Right));
+        tools.Children.Add(Docked(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(4, 0, 0, 0), Children = { _hiddenButton, find, newFolder } }, Dock.Right));
         tools.Children.Add(_path);
 
         _list = new ListBox
@@ -98,6 +144,8 @@ public sealed class FilePanel : UserControl
 
         // On the way down, because the list keeps Enter for itself: it would pick the focused row and stop there.
         _list.AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        // Typing comes up from the row that holds the keyboard, and is only for the list when nothing else took it.
+        _list.AddHandler(TextInputEvent, OnTextInput, RoutingStrategies.Bubble, handledEventsToo: true);
         _list.AddHandler(PointerPressedEvent, OnPointerPressedTunnel, RoutingStrategies.Tunnel);
         _list.AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel);
         _list.AddHandler(PointerReleasedEvent, (_, _) => _pressed = null, RoutingStrategies.Tunnel);
@@ -113,13 +161,18 @@ public sealed class FilePanel : UserControl
         AddHeader(_header, 2, L.T("Size"), "size");
         AddHeader(_header, 3, L.T("Modified"), "date");
         AddHeader(_header, 4, L.T("Permissions"), "permissions");
+        ShowSortOrder();
         _list.SizeChanged += (_, e) => FitColumns(e.NewSize.Width);
+
+        // On the way down, so that the keys work wherever in the panel the cursor is: in the list, or in the box for the path.
+        AddHandler(KeyDownEvent, OnPanelKeyDown, RoutingStrategies.Tunnel);
 
         var footer = new Border { Padding = new Thickness(12, 4), BorderBrush = ElioColors.Border, BorderThickness = new Thickness(0, 1, 0, 0), Child = _status };
 
         var layout = new DockPanel();
         if (title is not null) layout.Children.Add(Docked(TitleRow(title), Dock.Top));
         layout.Children.Add(Docked(tools, Dock.Top));
+        layout.Children.Add(Docked(_find, Dock.Top));
         layout.Children.Add(Docked(_header, Dock.Top));
         layout.Children.Add(Docked(footer, Dock.Bottom));
         layout.Children.Add(new Panel { Children = { _list, _dropHint } });
@@ -165,9 +218,28 @@ public sealed class FilePanel : UserControl
 
     public string CurrentPath { get; private set; } = string.Empty;
 
-    public IReadOnlyList<FileRow> Rows => _rows;
+    /// <summary>The rows the list shows now: what the search and the hidden-files switch let through.</summary>
+    public IReadOnlyList<FileRow> Rows => _shown;
 
     public IReadOnlyList<FileRow> SelectedRows => _list.SelectedItems?.OfType<FileRow>().ToList() ?? [];
+
+    /// <summary>Whether the list leaves hidden files out. Setting it does not tell <see cref="HideHiddenChanged"/>.</summary>
+    public bool HideHidden
+    {
+        get => _hideHidden;
+        set
+        {
+            if (_hideHidden == value) return;
+            _hideHidden = value;
+            MarkHiddenButton();
+            _ = RebuildAsync();
+        }
+    }
+
+    /// <summary>The user turned hidden files on or off, which the other side is to follow.</summary>
+    public event Action<bool>? HideHiddenChanged;
+
+    private static string PrimaryKey => OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl";
 
     /// <summary>What the status line says.</summary>
     public string StatusText => _status.Text ?? string.Empty;
@@ -202,6 +274,14 @@ public sealed class FilePanel : UserControl
         label.PointerPressed += (_, _) => SortBy(key);
         Grid.SetColumn(label, column);
         header.Children.Add(label);
+        _headerLabels[key] = (label, text);
+    }
+
+    // An arrow after the name of the column the list is in the order of, pointing the way it runs.
+    private void ShowSortOrder()
+    {
+        foreach ((string key, (TextBlock label, string text)) in _headerLabels)
+            label.Text = key == _sortKey ? text + (_sortDescending ? " ↓" : " ↑") : text;
     }
 
     private FuncDataTemplate<FileRow> MakeTemplate() => new((row, _) => BuildRow(row), supportsRecycling: false);
@@ -243,11 +323,44 @@ public sealed class FilePanel : UserControl
             grid.Children.Add(block);
         }
 
-        Add(1, row.IsLink ? $"{row.Name} ↗" : row.Name, ElioColors.Text);
+        grid.Children.Add(NameCell(row));
         Add(2, row.IsDirectory ? string.Empty : FileText.Size(row.Size), ElioColors.TextMuted);
         Add(3, row.ModifiedUtc == DateTime.MinValue ? string.Empty : row.ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), ElioColors.TextMuted);
         Add(4, row.Permissions, ElioColors.TextMuted);
         return grid;
+    }
+
+    // The name, with what the search found in it in bold, and for a result from a folder below the one shown, that folder after it.
+    private TextBlock NameCell(FileRow row)
+    {
+        var cell = new TextBlock { FontSize = 12, Foreground = ElioColors.Text, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(cell, 1);
+
+        string suffix = row.IsLink ? " ↗" : string.Empty;
+        bool found = _applied.TryFind(row.Name, out int start, out int length);
+        if (!found && row.Where is not { Length: > 0 })
+        {
+            cell.Text = row.Name + suffix;
+            return cell;
+        }
+
+        var runs = new InlineCollection();
+        if (found)
+        {
+            runs.Add(new Run(row.Name[..start]));
+            runs.Add(new Run(row.Name.Substring(start, length)) { FontWeight = FontWeight.Bold, Background = ElioColors.Selection });
+            runs.Add(new Run(row.Name[(start + length)..] + suffix));
+        }
+        else
+        {
+            runs.Add(new Run(row.Name + suffix));
+        }
+
+        if (row.Where is { Length: > 0 } where)
+            runs.Add(new Run("  " + where) { Foreground = ElioColors.TextMuted, FontSize = ElioStyle.SmallFontSize });
+
+        cell.Inlines = runs;
+        return cell;
     }
 
     private ContextMenu BuildMenu()
@@ -269,8 +382,15 @@ public sealed class FilePanel : UserControl
         if (Source is RemoteFileSource) items.Add(Item(L.T("Permissions"), () => _ = ChangePermissionsAsync()));
         items.Add(Item(L.T("Delete"), () => _ = DeleteSelectedAsync()));
         items.Add(Item(L.T("Copy path"), () => _ = CopyPathAsync()));
+
+        // Only for a result found in a folder below, where it is a way to get to the file.
+        MenuItem inFolder = Item(L.T("Show in its folder"), () => { if (SelectedRows.FirstOrDefault() is FileRow row) _ = GoToAsync(row); });
+        items.Add(inFolder);
         items.Add(Item(L.T("Refresh"), () => _ = RefreshAsync()));
-        return new ContextMenu { ItemsSource = items };
+
+        var menu = new ContextMenu { ItemsSource = items };
+        menu.Opening += (_, _) => inFolder.IsVisible = SelectedRows is [{ Where: not null }];
+        return menu;
     }
 
     private async Task CopyPathAsync()
@@ -294,9 +414,21 @@ public sealed class FilePanel : UserControl
     {
         _status.Foreground = ElioColors.TextMuted;
         IReadOnlyList<FileRow> selected = SelectedRows;
-        _status.Text = selected.Count > 0
-            ? L.T("{0} selected, {1}", selected.Count, FileText.Size(selected.Where(r => !r.IsDirectory).Sum(r => r.Size)))
-            : L.T("{0} items", _rows.Count);
+        if (selected.Count > 0)
+        {
+            _status.Text = L.T("{0} selected, {1}", selected.Count, FileText.Size(selected.Where(r => !r.IsDirectory).Sum(r => r.Size)));
+            return;
+        }
+
+        // While a search narrows the list, what is left is told against what it was picked from.
+        string text = _applied.IsEmpty ? L.T("{0} items", _shown.Count) : L.T("{0} of {1} items", _shown.Count, _candidates);
+        if (_deep.Summary is { } summary && !_applied.IsEmpty)
+        {
+            if (summary.Truncated) text += " " + L.T("The search stopped at {0:N0} items, so there may be more.", FileTreeScanner.DefaultLimit);
+            if (summary.Unreadable > 0) text += " " + L.T("{0} folders could not be read.", summary.Unreadable);
+        }
+
+        _status.Text = text;
     }
 
     /// <summary>Starts in the folder the source suggests.</summary>
@@ -320,7 +452,9 @@ public sealed class FilePanel : UserControl
         _status.Text = text;
     }
 
-    public Task RefreshAsync() => Source.IsRemote && CurrentPath.Length == 0 ? StartAsync() : NavigateAsync(CurrentPath, keepSelection: true);
+    /// <param name="searchSubfolders">Look through the folders below again when a search of them is open. Left off for a refresh nobody asked for, such as one after a transfer, which would cost a server a round trip for every folder.</param>
+    public Task RefreshAsync(bool searchSubfolders = true) =>
+        Source.IsRemote && CurrentPath.Length == 0 ? StartAsync() : NavigateAsync(CurrentPath, keepSelection: true, searchSubfolders);
 
     private void GoUp()
     {
@@ -328,27 +462,29 @@ public sealed class FilePanel : UserControl
     }
 
     /// <summary>Shows a folder. A newer request replaces one still loading.</summary>
-    public async Task NavigateAsync(string path, bool keepSelection = false)
+    public async Task NavigateAsync(string path, bool keepSelection = false, bool searchSubfolders = true)
     {
         _listing?.Cancel();
         var listing = new CancellationTokenSource();
         _listing = listing;
-        HashSet<string> selected = keepSelection ? SelectedRows.Select(r => r.Name).ToHashSet() : [];
+        HashSet<string> selected = keepSelection ? SelectedRows.Select(r => r.Path).ToHashSet() : [];
 
         try
         {
             List<FileRow> rows = await Source.ListAsync(path, listing.Token);
             if (listing.IsCancellationRequested) return;
 
+            // A search belongs to the folder it was begun in. The same folder listed again keeps it.
+            bool sameFolder = path == CurrentPath;
             CurrentPath = path;
             _path.Text = path;
             _rows = rows;
-            ApplySort();
+            _restore = selected;
 
-            if (selected.Count > 0)
-                foreach (FileRow row in _rows.Where(r => selected.Contains(r.Name))) _list.SelectedItems?.Add(row);
+            if (!sameFolder) EndFind();
+            else if (searchSubfolders) RestartSubfolderSearch();
 
-            ShowSummary();
+            await RebuildAsync();
         }
         catch (OperationCanceledException) when (listing.IsCancellationRequested)
         {
@@ -363,7 +499,8 @@ public sealed class FilePanel : UserControl
 
     private void SortBy(string key)
     {
-        _sortDescending = _sortKey == key && !_sortDescending;
+        // The biggest and the newest are what one looks for, so those columns begin with them. A second press turns it round.
+        _sortDescending = _sortKey == key ? !_sortDescending : key is "size" or "date";
         _sortKey = key;
         _sort = key switch
         {
@@ -372,16 +509,96 @@ public sealed class FilePanel : UserControl
             "permissions" => (a, b) => string.CompareOrdinal(a.Permissions, b.Permissions),
             _ => (a, b) => StringComparer.CurrentCultureIgnoreCase.Compare(a.Name, b.Name),
         };
-        ApplySort();
+        ShowSortOrder();
+        _ = RebuildAsync();
     }
 
-    private void ApplySort()
+    /// <summary>
+    /// Makes the list from the folder: out go the hidden files and what the search does not want, and the rest is put in
+    /// order. A big folder takes a while to go through, so that is done away from the window, and a newer call replaces one
+    /// that is still going.
+    /// </summary>
+    /// <param name="delay">How long to wait for more typing first.</param>
+    /// <param name="keepScroll">Stay where the list is scrolled to, for when more results arrive while it is being read.</param>
+    private async Task RebuildAsync(TimeSpan delay = default, bool keepScroll = false)
     {
+        _viewing?.Cancel();
+        var viewing = new CancellationTokenSource();
+        _viewing = viewing;
+
+        FileFilter filter = FilterNow();
+        bool inSubfolders = _find.IncludeSubfolders && !filter.IsEmpty;
+
+        // What the search found below is added to on the window's thread, so what is read away from it is a copy.
+        List<FileRow> pool = _rows;
+        if (inSubfolders) pool = [.. _rows, .. _deep.Rows];
+        bool showHidden = !_hideHidden;
+        Comparison<FileRow> sort = _sort;
         int direction = _sortDescending ? -1 : 1;
-        _rows = _rows
-            .Order(Comparer<FileRow>.Create((a, b) => a.IsDirectory != b.IsDirectory ? (a.IsDirectory ? -1 : 1) : direction * _sort(a, b)))
-            .ToList();
-        _list.ItemsSource = _rows;
+        var order = Comparer<FileRow>.Create((a, b) => a.IsDirectory != b.IsDirectory ? (a.IsDirectory ? -1 : 1) : direction * sort(a, b));
+
+        try
+        {
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, viewing.Token);
+
+            FileFilter.Result result = await Task.Run(() =>
+            {
+                FileFilter.Result picked = FileFilter.Apply(pool, filter, showHidden, viewing.Token);
+                return picked.TimedOut ? picked : picked with { Rows = picked.Rows.Order(order).ToList() };
+            }, viewing.Token);
+            if (viewing.IsCancellationRequested) return;
+
+            // What was chosen stays chosen, unless a refresh has said what is to be chosen again. Looked at only now, since
+            // the user may have chosen something else while the list was being made.
+            HashSet<string> keep = _restore ?? SelectedRows.Select(r => r.Path).ToHashSet();
+
+            // The row that holds the keyboard goes with the old list, and the keyboard has to be given back.
+            bool hadKeyboard = _list.IsKeyboardFocusWithin;
+
+            Vector offset = keepScroll ? ListScroll()?.Offset ?? default : default;
+            _applied = filter;
+            _candidates = result.Candidates;
+            _shown = result.Rows;
+            _shownNames = _shown.ConvertAll(r => r.Name);
+            _list.ItemsSource = _shown;
+            if (keepScroll && ListScroll() is ScrollViewer scroll) scroll.Offset = offset;
+
+            _restore = null;
+            Reselect(keep, filter, result.TimedOut);
+            if (hadKeyboard) FocusContents();
+            ShowSummary();
+            ShowMatchCount(result.TimedOut);
+        }
+        catch (OperationCanceledException) when (viewing.IsCancellationRequested)
+        {
+            // Replaced by a newer one.
+        }
+    }
+
+    private ScrollViewer? ListScroll() => _list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+
+    // Chooses again what was chosen. With nothing chosen and a search being typed, the first name is the one Enter will go to.
+    private void Reselect(HashSet<string> keep, FileFilter filter, bool timedOut)
+    {
+        _list.SelectedItems?.Clear();
+
+        if (keep.Count > 0)
+        {
+            // By place and not by row, and a stretch at a time: asking the list for each row takes as long as the list does.
+            int from = -1;
+            for (int i = 0; i <= _shown.Count; i++)
+            {
+                bool kept = i < _shown.Count && keep.Contains(_shown[i].Path);
+                if (kept && from < 0) from = i;
+                if (kept || from < 0) continue;
+
+                _list.Selection.SelectRange(from, i - 1);
+                from = -1;
+            }
+        }
+
+        if (_list.SelectedItems?.Count == 0 && _find.IsVisible && _find.IsTyping && !filter.IsEmpty && !timedOut && _shown.Count > 0)
+            _list.SelectedIndex = 0;
     }
 
     private void OnDoubleTapped(object? sender, TappedEventArgs e)
@@ -402,6 +619,12 @@ public sealed class FilePanel : UserControl
     {
         switch (e.Key)
         {
+            case Key.Escape when _find.IsVisible:
+                _ = CloseFindAsync();
+                break;
+            case Key.A when e.KeyModifiers == PrimaryModifier:
+                _list.SelectAll();
+                break;
             case Key.Enter when SelectedRows.Count == 1 && SelectedRows[0].IsDirectory:
                 _ = NavigateAsync(SelectedRows[0].Path);
                 break;
@@ -432,6 +655,190 @@ public sealed class FilePanel : UserControl
 
         e.Handled = true;
     }
+
+    private static KeyModifiers PrimaryModifier => OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+
+    // Where macOS has Cmd+H for hiding the program itself, Finder's own key for hidden files is the one to use.
+    private static bool IsHiddenKey(KeyEventArgs e) => OperatingSystem.IsMacOS()
+        ? e.Key == Key.OemPeriod && e.KeyModifiers == (KeyModifiers.Meta | KeyModifiers.Shift)
+        : e.Key == Key.H && e.KeyModifiers == KeyModifiers.Control;
+
+    private static string HiddenKeys => OperatingSystem.IsMacOS() ? "Cmd+Shift+." : "Ctrl+H";
+
+    private void OnPanelKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyModifiers == PrimaryModifier && e.Key == Key.F) ShowFind();
+        else if (e.KeyModifiers == PrimaryModifier && e.Key == Key.L) FocusPath();
+        else if (IsHiddenKey(e)) ToggleHidden();
+        else return;
+
+        e.Handled = true;
+    }
+
+    private void FocusList() => FocusContents();
+
+    /// <summary>
+    /// Gives the keyboard to the list, on the row that is chosen, so that the keys of this panel work. A list cannot take
+    /// the keyboard itself, only its rows can, and they exist once the list has been laid out. With no row to take it,
+    /// the panel does.
+    /// </summary>
+    public void FocusContents() => Dispatcher.UIThread.Post(() =>
+    {
+        Control? row = _shown.Count > 0 ? _list.ContainerFromIndex(Math.Max(_list.SelectedIndex, 0)) : null;
+        (row ?? this).Focus();
+    }, DispatcherPriority.Loaded);
+
+    private void FocusPath()
+    {
+        _path.Focus();
+        _path.SelectAll();
+    }
+
+    // Typing in the list moves to the name that starts with the letters, as it does in a file manager.
+    private void OnTextInput(object? sender, TextInputEventArgs e)
+    {
+        if (e.Text is not { Length: > 0 } typed || _shown.Count == 0) return;
+
+        int index = _typeAhead.Type(typed, _shownNames, _list.SelectedIndex, DateTime.UtcNow);
+        if (index < 0) return;
+
+        e.Handled = true;
+        ChooseRow(index);
+    }
+
+    private void ChooseRow(int index)
+    {
+        _list.SelectedIndex = index;
+        _list.ScrollIntoView(index);
+    }
+
+    private void MoveSelection(int by)
+    {
+        if (_shown.Count > 0) ChooseRow(Math.Clamp(_list.SelectedIndex + by, 0, _shown.Count - 1));
+    }
+
+    /// <summary>Opens the search bar over the list and puts the cursor in it.</summary>
+    public void ShowFind() => _find.Open();
+
+    private FileFilter FilterNow() => _find.IsVisible ? FileFilter.Parse(_find.Text, _find.UseRegex) : FileFilter.None;
+
+    private void OnFindChanged(bool typing)
+    {
+        if (_quiet) return;
+
+        if (AppServices.Settings.FileFilterWithRegex != _find.UseRegex)
+        {
+            AppServices.Settings.FileFilterWithRegex = _find.UseRegex;
+            AppServices.SaveSettings();
+        }
+
+        // Turning the folders below off ends a walk that is still going. What it found is thrown away with it.
+        if (!_find.IncludeSubfolders) _deep.Stop();
+        else if (!_deep.HasStarted) RestartSubfolderSearch();
+
+        _ = RebuildAsync(typing ? TypingDelay : TimeSpan.Zero);
+    }
+
+    // The folders below are only looked through for something to look for, and once, however much is typed.
+    private void RestartSubfolderSearch()
+    {
+        if (_find.IsVisible && _find.IncludeSubfolders && !FilterNow().IsEmpty) _deep.Start(_rows);
+        else _deep.Stop();
+    }
+
+    // More was found below, or the walk is over.
+    private void OnSubfolderResults()
+    {
+        if (!_find.IsVisible) return;
+
+        if (FilterNow().IsEmpty) ShowMatchCount(timedOut: false);
+        else _ = RebuildAsync(keepScroll: true);
+    }
+
+    private void ShowMatchCount(bool timedOut)
+    {
+        if (!_find.IsVisible) return;
+
+        if (_applied.IsInvalid) _find.ShowCount(L.T("Not a valid pattern"), problem: true);
+        else if (timedOut) _find.ShowCount(L.T("Took too long"), problem: true);
+        else if (_applied.IsEmpty) _find.ShowCount(string.Empty, problem: false);
+        else if (_deep.IsRunning) _find.ShowCount(L.T("{0} found, searching...", _shown.Count), problem: false);
+        else if (_shown.Count == 0) _find.ShowCount(L.T("No matches"), problem: false);
+        else _find.ShowCount(L.T("{0} of {1}", _shown.Count, _candidates), problem: false);
+    }
+
+    // Enter: go where the chosen name is. A folder is opened, a file is chosen in its own folder, and nothing is copied
+    // from here, since pressing Enter after typing is not asking for that.
+    private async Task AcceptFindAsync()
+    {
+        await RebuildAsync();
+
+        FileRow? target = SelectedRows.FirstOrDefault() ?? _shown.FirstOrDefault();
+        if (target is null) return;
+
+        if (target.IsDirectory)
+        {
+            await NavigateAsync(target.Path);
+            _list.Focus();
+        }
+        else if (target.Where is not null)
+        {
+            await GoToAsync(target);
+        }
+        else
+        {
+            ChooseRow(_shown.IndexOf(target));
+            _list.Focus();
+        }
+    }
+
+    /// <summary>Shows the folder a file is in, with the file chosen.</summary>
+    private async Task GoToAsync(FileRow row)
+    {
+        if (Source.Parent(row.Path) is not string folder) return;
+
+        await NavigateAsync(folder);
+        int index = _shown.FindIndex(r => r.Path == row.Path);
+        if (index >= 0) ChooseRow(index);
+        _list.Focus();
+    }
+
+    // Ends the search without touching the list: for when a new folder is about to replace it.
+    private void EndFind()
+    {
+        _deep.Stop();
+        _quiet = true;
+        try
+        {
+            _find.IncludeSubfolders = false;
+            _find.Text = string.Empty;
+            _find.ShowCount(string.Empty, problem: false);
+            _find.IsVisible = false;
+        }
+        finally
+        {
+            _quiet = false;
+        }
+
+        _applied = FileFilter.None;
+    }
+
+    private async Task CloseFindAsync()
+    {
+        EndFind();
+        _list.Focus();
+        await RebuildAsync();
+    }
+
+    private void ToggleHidden()
+    {
+        HideHidden = !_hideHidden;
+        AppServices.Settings.HideHiddenFiles = _hideHidden;
+        AppServices.SaveSettings();
+        HideHiddenChanged?.Invoke(_hideHidden);
+    }
+
+    private void MarkHiddenButton() => _hiddenButton.Background = _hideHidden ? ElioColors.Selection : ElioColors.Transparent;
 
     private async Task NewFolderAsync()
     {

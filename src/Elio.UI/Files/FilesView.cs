@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -55,6 +56,7 @@ public sealed class FilesView : UserControl
     private readonly StackPanel _editRows = new() { Spacing = 2 };
     private readonly Dictionary<RemoteEdit, TextBlock> _edits = [];
     private readonly HashSet<TransferJob> _refreshed = [];
+    private FilePanel _lastUsed = null!;
 
     public FilesView(Func<CancellationToken, Task<SftpConnection>> connect, DialogHost dialogs) : this(new FileServer(string.Empty, connect), null, dialogs)
     {
@@ -102,7 +104,22 @@ public sealed class FilesView : UserControl
             Transfers = new TransferListView(Queue, server.Name, other.Name);
         }
 
+        _lastUsed = Remote;
         Queue.Changed += () => Dispatcher.UIThread.Post(RefreshFinishedTargets);
+
+        // Hiding hidden files is one choice for both sides.
+        Local.HideHiddenChanged += hide => Remote.HideHidden = hide;
+        Remote.HideHiddenChanged += hide => Local.HideHidden = hide;
+
+        // Where the key falls on neither list, such as on the transfers, search goes to the side that was used last.
+        Local.GotFocus += (_, _) => _lastUsed = Local;
+        Remote.GotFocus += (_, _) => _lastUsed = Remote;
+        KeyDown += (_, e) =>
+        {
+            if (e.Handled || e.Key != Key.F || e.KeyModifiers != (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) return;
+            e.Handled = true;
+            ShowFind();
+        };
 
         var panels = new Grid { ColumnDefinitions = new ColumnDefinitions($"*,{SplitterSize},*") };
         Grid.SetColumn(Remote, 2);
@@ -126,6 +143,12 @@ public sealed class FilesView : UserControl
         layout.Children.Add(Transfers);
         Content = layout;
     }
+
+    /// <summary>Gives the keyboard to the side that was used last, or the server's when neither was.</summary>
+    public void FocusContents() => _lastUsed.FocusContents();
+
+    /// <summary>Opens the search bar of the side that was used last, or of the server's when neither was.</summary>
+    public void ShowFind() => _lastUsed.ShowFind();
 
     /// <summary>The left side: this computer, or the other server when there are two.</summary>
     public FilePanel Local { get; }
@@ -187,7 +210,7 @@ public sealed class FilesView : UserControl
         foreach (TransferJob job in Queue.Jobs.Where(j => j.IsFinished && _refreshed.Add(j)))
         {
             FilePanel target = job.Kind == TransferKind.Download ? Local : PanelOf(job.TargetServer);
-            if (job.Target == target.CurrentPath) _ = target.RefreshAsync();
+            if (job.Target == target.CurrentPath) _ = target.RefreshAsync(searchSubfolders: false);
         }
     }
 

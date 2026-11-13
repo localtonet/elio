@@ -4,7 +4,9 @@ using Elio.Core;
 namespace Elio.UI.Files;
 
 /// <summary>One line in a file list.</summary>
-public sealed record FileRow(string Name, string Path, long Size, DateTime ModifiedUtc, bool IsDirectory, bool IsLink, string Permissions, RemoteEntry? Remote);
+/// <param name="IsHidden">A name that starts with a dot, or a file marked hidden on Windows.</param>
+/// <param name="Where">Set for a result found in a folder below the one shown: that folder, written from the one shown.</param>
+public sealed record FileRow(string Name, string Path, long Size, DateTime ModifiedUtc, bool IsDirectory, bool IsLink, string Permissions, RemoteEntry? Remote, bool IsHidden = false, string? Where = null);
 
 /// <summary>Where a panel's files come from, so both sides of the screen can be the same control.</summary>
 public interface IFileSource
@@ -48,7 +50,8 @@ public sealed class LocalFileSource : IFileSource
         {
             cancellation.ThrowIfCancellationRequested();
             bool isDirectory = info is DirectoryInfo;
-            rows.Add(new FileRow(info.Name, info.FullName, isDirectory ? 0 : ((FileInfo)info).Length, info.LastWriteTimeUtc, isDirectory, info.LinkTarget is not null, PermissionText(info), null));
+            bool hidden = info.Name.StartsWith('.') || info.Attributes.HasFlag(FileAttributes.Hidden);
+            rows.Add(new FileRow(info.Name, info.FullName, isDirectory ? 0 : ((FileInfo)info).Length, info.LastWriteTimeUtc, isDirectory, info.LinkTarget is not null, PermissionText(info), null, hidden));
         }
 
         return rows;
@@ -106,7 +109,7 @@ public sealed class RemoteFileSource(Func<CancellationToken, Task<SftpConnection
     public async Task<List<FileRow>> ListAsync(string path, CancellationToken cancellation)
     {
         SftpConnection c = await connection(cancellation);
-        return (await c.ListAsync(path, cancellation)).Select(e => new FileRow(e.Name, e.FullPath, e.Size, e.ModifiedUtc, e.IsDirectory, e.IsSymbolicLink, e.Permissions, e)).ToList();
+        return (await c.ListAsync(path, cancellation)).Select(e => new FileRow(e.Name, e.FullPath, e.Size, e.ModifiedUtc, e.IsDirectory, e.IsSymbolicLink, e.Permissions, e, e.Name.StartsWith('.'))).ToList();
     }
 
     public string? Parent(string path) => path is "/" or "" ? null : RemotePath.Parent(path);
