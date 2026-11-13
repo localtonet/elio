@@ -112,6 +112,7 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 - **Summon key (Windows).** Set a key in Settings and it shows or hides the window from anywhere; optionally the window drops down from the top of the screen. With a summon key set, Elio also sits in the system tray.
 - **Shells that outlive the window.** With **Keep local shells running when Elio closes, and pick them up again**, local shells run in a small background process. Closing Elio, or replacing it with a newer version, leaves them running for the next window to pick up exactly where they were.
 - **Portable mode.** Create a folder named `data` beside the program and Elio keeps everything in it: settings, servers, downloads and logs. Carry it on a USB drive and nothing is left behind on the computer you plug it into. Saved passwords stay locked to the account that stored them, so another computer asks for them again.
+- **Updates.** When a newer version is out, a line above the terminals says so. **Update and restart** downloads it, checks it and swaps it in, and Elio comes back with your tabs; nothing is installed until you press it. **Check for updates** in the palette asks at once. Where Elio cannot replace itself, as when a package manager installed it, the line opens the download page instead. Only a release signed with Elio's own release key is installed: see [Security](#security).
 
 <img src="docs/screenshots/settings-dark.webp" alt="The Settings window: language, theme, following the system, font size, light interface, ligatures and more" width="420">
 
@@ -308,6 +309,7 @@ A few keys belong to the terminal itself: the right arrow accepts a suggestion a
 - On a phone, Elio can be locked behind the device's fingerprint, face or passcode.
 - No telemetry. Passwords and keys are never written to logs.
 - The only request Elio makes on its own is a version check: on a computer, at most once a day, it asks GitHub for the latest release and tells you if there is a newer one. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
+- Updates are installed only when you press **Update and restart**, and only if they come from us. Each release carries a manifest (`update.json`) that lists its version and the SHA-256 of every file, signed with ECDSA (P-256) by a key that exists only in the release workflow's secrets. Elio checks the signature against the public keys built into the program ([`update-keys.txt`](src/Elio.Core/update-keys.txt)), the manifest against the version it was told about, and the downloaded file against the manifest, before it replaces anything. A file someone swapped on the releases page, or an older signed release served again, is refused. A copy built without a key in that file never installs anything by itself.
 
 Found a security problem? [SECURITY.md](SECURITY.md) says how to report it privately.
 
@@ -316,6 +318,7 @@ Found a security problem? [SECURITY.md](SECURITY.md) says how to report it priva
 Elio has no telemetry, no analytics, no crash reports and no account of its own. Your servers, passwords, keys and settings stay on your device. Apart from the servers you connect to, it talks to the network only in these cases:
 
 - **The version check** (computers only): at most once a day it asks GitHub for the latest release. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
+- **Updating**, when you press **Update and restart**: Elio downloads that release's files from github.com. Nothing about you or your servers is sent.
 - **Sync**, if you turn it on: encrypted on your device first, so the sync server stores ciphertext it cannot read.
 - **Shared terminals**, if you share one: encrypted from end to end, passed along by the sync server.
 - **Localtonet**, if you sign in, and **cloud imports**, when you run one: the account or token goes to that provider only.
@@ -402,6 +405,8 @@ On Windows this needs the Visual Studio C++ build tools.
 ### Releases
 
 Pushing a tag such as `v1.2.3` runs `.github/workflows/release.yml`, which rebuilds libghostty-vt from source, builds Elio for Windows (x64), Linux (x64 and arm64, each as a tar.gz and a .deb), macOS (Apple silicon and Intel, as `Elio.app`) and Android, and publishes them on the releases page with a `SHA256SUMS` file. A tag with a hyphen, such as `v1.2.3-beta.1`, becomes a pre-release. The Android package is signed with the key in the repository's `ANDROID_KEYSTORE_*` secrets, which the workflow file describes.
+
+**Updates from inside the app.** A release that copies of Elio can install themselves from also carries `update.json` and `update.json.sig`. The workflow writes them with `build/update-manifest.sh` and signs them with the private key in the repository secret `UPDATE_SIGNING_KEY`; the matching public key is in `src/Elio.Core/update-keys.txt`, built into every copy. Make the key pair once with `sh build/update-key.sh <where to write the private key>`, put the private key in the secret, keep a copy somewhere safe, and commit the public key. Without the secret a release is still published, and copies of Elio only announce it. Only the Windows zip, the macOS zips and the Linux tar.gz files are installed from; a .deb, which belongs to the package manager, and the Android package are not. A pre-release is announced to nobody and installed by nobody.
 
 ### Environment variables
 

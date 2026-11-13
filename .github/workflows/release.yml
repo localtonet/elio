@@ -6,6 +6,11 @@
 # The Android package is signed with the release key when these repository secrets exist, and with a
 # throwaway debug key otherwise (such a package installs, but cannot be updated by a later build):
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#
+# What lets copies of Elio update themselves is a signed manifest (update.json) of the release. It is signed with the
+# private key in the repository secret UPDATE_SIGNING_KEY, whose public half is in src/Elio.Core/update-keys.txt and so
+# in every build. Without the secret the release has no manifest, and copies only announce it. To make the key, run
+# build/update-key.sh.
 name: Release
 
 on:
@@ -235,6 +240,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      # For the scripts in build/ and the keys the programs were built to trust.
+      - uses: actions/checkout@v7
+
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -251,6 +259,23 @@ jobs:
             mv "$file" "elio-${file#elio-"$version"-}"
           done
           ls -l
+
+      # What a copy of Elio installs itself from: update.json lists the version and the SHA-256 of each file, and
+      # update.json.sig signs it with the key in UPDATE_SIGNING_KEY. Without the secret the release is still
+      # published, and copies of Elio only announce it. A pre-release is never offered for installing.
+      - name: Signed update manifest
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::warning::No UPDATE_SIGNING_KEY is configured, so this release has no signed manifest and copies of Elio will only announce it."
+            exit 0
+          fi
+          key=$RUNNER_TEMP/update.key
+          (umask 077 && printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key")
+          sh build/update-manifest.sh "${GITHUB_REF_NAME#v}" dist "$key"
+          rm -f "$key"
 
       - name: Checksums
         working-directory: dist

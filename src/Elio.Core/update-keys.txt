@@ -1,0 +1,12 @@
+# The public keys that releases of Elio are signed with, one to a line, in base64.
+#
+# A copy of Elio installs an update only if the release's manifest (update.json) is signed by one of these keys.
+# The private key is not in this repository: it is the repository secret UPDATE_SIGNING_KEY, and the release
+# workflow signs with it. While this file holds no key, Elio only tells you that a new version exists.
+#
+# Make a key with:  sh build/update-key.sh <where to write the private key>
+# The script adds the public half here. To replace a key, add the new one first, ship a release signed with
+# the old key, and only then remove the old one, so that copies in the field can follow.
+
+# Added 2026-11-13
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+uDkNrhF7e6OEyjLO+3e8ZXyT2MkELjr49LbgllW2PkmfIrLZUBzdXNFLT68YSbmLUm7ElMUwAkGu5PDzN+JaA==

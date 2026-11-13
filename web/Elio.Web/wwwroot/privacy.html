@@ -67,6 +67,7 @@
           <ul>
             <li><strong>The servers you connect to.</strong> SSH, SFTP, Telnet and Mosh servers, serial ports, jump hosts and proxies are the ones you added. They receive what you type and what you transfer, as with any terminal.</li>
             <li><strong>The version check (computers only).</strong> At most once a day Elio asks GitHub's API for the latest release of <code>localtonet/elio</code> and tells you if there is a newer one. Nothing about you or your servers is sent beyond the request itself, which GitHub sees as it sees any other, including your network address (see <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">GitHub's privacy statement</a>). <strong>Check for new versions when Elio starts</strong> in Settings turns it off. Phones do not make this request.</li>
+            <li><strong>Updating (only when you press the button).</strong> <strong>Update and restart</strong> downloads that release's files from github.com and replaces the program with the new version, but only after checking a signature made with Elio's own release key. The request is an ordinary download; nothing about you or your servers is sent.</li>
             <li><strong>Sync (only if you turn it on).</strong> Everything is encrypted on your device with a key made from your password before it leaves, so the sync server, <code>sync.elio.sh</code> by default or one of your own, stores ciphertext only. It cannot read it. Like any server it receives the network address of each request, which it uses to limit abuse, and it holds the sync code, or the Localtonet account, that says whose data it is, together with the size and time of what is stored. The server is open source and <a href="./#self-host">can be run by you</a>.</li>
             <li><strong>Shared terminals (only if you share one).</strong> The stream is encrypted from end to end with a key made from the password you give the viewer. The relay, the same sync server unless you chose another in Settings, passes on bytes it cannot read, and sharing ends when you stop it.</li>
             <li><strong>Localtonet (only if you sign in).</strong> Signing in lists your Localtonet devices and lets Elio connect to them. What Localtonet receives and keeps is governed by Localtonet's own terms and privacy policy at <a href="https://localtonet.com" rel="noopener">localtonet.com</a>. The key Elio is given can only list devices and prove your identity to the sync server.</li>
@@ -83,7 +84,7 @@
 
           <h2 id="control">Your choices</h2>
           <ul>
-            <li>Turn off the version check, sync, sharing, Localtonet sign-in and AI tools in Settings. Each one is off until you use it, except the version check.</li>
+            <li>Turn off the version check, sync, sharing, Localtonet sign-in and AI tools in Settings. Each one is off until you use it, except the version check. Nothing is ever installed unless you press <strong>Update and restart</strong>.</li>
             <li>Delete Elio's data folder to remove everything it keeps on your device.</li>
             <li>Run your own sync server if you would rather not use <code>sync.elio.sh</code>.</li>
           </ul>

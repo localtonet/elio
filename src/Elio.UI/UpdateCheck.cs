@@ -1,11 +1,19 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace Elio.UI;
 
+/// <summary>A release that is newer than the running version, as the check found it.</summary>
+/// <param name="Version">The version, as the numbers it was compared by.</param>
+/// <param name="Tag">The release's tag, such as "v1.2.3", when it is a plain version that can be installed from. Null otherwise.</param>
+/// <param name="Page">The release's page on github.com.</param>
+public sealed record ReleaseInfo(string Version, string? Tag, Uri Page);
+
 /// <summary>
-/// Asks GitHub, once per start and at most once a day, whether a newer version of Elio has been released, and says so
-/// if there is one. It is the only request Elio makes that the user did not ask for, it sends nothing but the
-/// question, and it can be turned off in the settings. Whatever goes wrong, it stays quiet.
+/// Asks GitHub, at most once a day, whether a newer version of Elio has been released, and says so if there is one. It is
+/// the only request Elio makes that the user did not ask for, it sends nothing but the question, and it can be turned
+/// off in the settings. Whatever goes wrong, it stays quiet. Installing the new version is another matter: that happens
+/// only when the user presses the button for it (<see cref="UpdateInstaller"/>).
 /// </summary>
 public static class UpdateCheck
 {
@@ -25,8 +33,9 @@ public static class UpdateCheck
     public static Version? Running => typeof(UpdateCheck).Assembly.GetName().Version;
 
     /// <summary>
-    /// Starts the check, the first time it is called, and shows what it finds in the given window. Call it from the
-    /// thread the window lives on.
+    /// Starts the checks, the first time it is called, and shows what they find in the given window: one now, and one a
+    /// day later for as long as Elio keeps running, since a copy that sits in the tray can run for weeks. Call it from
+    /// the thread the window lives on.
     /// </summary>
     public static void Start(WorkspaceView workspace)
     {
@@ -38,14 +47,48 @@ public static class UpdateCheck
 
     private static async Task RunAsync(WorkspaceView workspace)
     {
+        while (true)
+        {
+            // A time in the future is a clock that was set back since, and does not put the check off.
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            TimeSpan wait = AppServices.Settings.LastUpdateCheck is DateTimeOffset last && now >= last && now - last < Pause ? Pause - (now - last) : TimeSpan.Zero;
+            if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
+            // The setting may have been turned off since the last round.
+            if (!AppServices.Settings.CheckForUpdates) return;
+
+            if (await CheckAsync() is { } release && !string.Equals(AppServices.Settings.UpdateNoticeVersion, release.Version, StringComparison.Ordinal))
+            {
+                AppServices.Settings.UpdateNoticeVersion = release.Version;
+                AppServices.SaveSettings();
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => workspace.ShowUpdateNotice(release));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Asks now, whatever was asked before, and says what came of it in the window: that there is a newer version, that
+    /// there is not, or that GitHub could not be reached. Used by the command that checks on request.
+    /// </summary>
+    public static async Task CheckNowAsync(WorkspaceView workspace)
+    {
+        if (AppServices.MobileLayout) return;
+
+        (bool asked, ReleaseInfo? release) = await CheckWithOutcomeAsync();
+        if (!asked) workspace.ShowNotice(Elio.Core.L.T("Elio could not find out if there is a newer version."));
+        else if (release is null) workspace.ShowNotice(Elio.Core.L.T("Elio is up to date."));
+        else workspace.ShowUpdateNotice(release);
+    }
+
+    private static async Task<ReleaseInfo?> CheckAsync() => (await CheckWithOutcomeAsync()).Release;
+
+    // Whether GitHub answered, and the release if it is a newer one.
+    private static async Task<(bool Asked, ReleaseInfo? Release)> CheckWithOutcomeAsync()
+    {
         Elio.Core.AppSettings settings = AppServices.Settings;
 
-        // A time in the future is a clock that was set back since, and does not put the check off.
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (settings.LastUpdateCheck is DateTimeOffset last && now >= last && now - last < Pause) return;
-
         // Written down before asking, so that a check that fails is not tried again at every start either.
-        settings.LastUpdateCheck = now;
+        settings.LastUpdateCheck = DateTimeOffset.UtcNow;
         AppServices.SaveSettings();
 
         string answer;
@@ -57,15 +100,11 @@ public static class UpdateCheck
         catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException or InvalidOperationException)
         {
             // Offline, or GitHub has had enough questions from this address for now.
-            return;
+            return (false, null);
         }
 
-        if (!TryReadRelease(answer, out string version, out Uri? page) || !IsNewer(version, Running)) return;
-        if (string.Equals(settings.UpdateNoticeVersion, version, StringComparison.Ordinal)) return;
-
-        settings.UpdateNoticeVersion = version;
-        AppServices.SaveSettings();
-        workspace.ShowUpdateNotice(version, page);
+        if (!TryReadRelease(answer, out ReleaseInfo? release)) return (false, null);
+        return (true, IsNewer(release.Version, Running) ? release : null);
     }
 
     /// <summary>
@@ -77,7 +116,7 @@ public static class UpdateCheck
         TryParseVersion(tag, out Version? released) && Whole(released) > Whole(running ?? new Version(0, 0));
 
     /// <summary>Reads a version out of a release tag. Returns false if there is none in it.</summary>
-    public static bool TryParseVersion(string? tag, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Version? version)
+    public static bool TryParseVersion(string? tag, [NotNullWhen(true)] out Version? version)
     {
         version = null;
         if (string.IsNullOrWhiteSpace(tag)) return false;
@@ -94,12 +133,13 @@ public static class UpdateCheck
     }
 
     /// <summary>
-    /// Takes the version and the page of a release out of GitHub's answer. The page is only accepted when it is an
-    /// https address on github.com, since it is opened in the browser; without one there is nothing to offer.
+    /// Takes the version, the tag and the page of a release out of GitHub's answer. The page is only accepted when it
+    /// is an https address on github.com, since it is opened in the browser; without one there is nothing to offer.
+    /// The tag is kept only when it is a plain "v1.2.3": a release with any other name is announced, not installed.
     /// </summary>
-    public static bool TryReadRelease(string json, out string version, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Uri? page)
+    public static bool TryReadRelease(string json, [NotNullWhen(true)] out ReleaseInfo? release)
     {
-        (version, page) = (string.Empty, null);
+        release = null;
         try
         {
             using JsonDocument document = JsonDocument.Parse(json);
@@ -111,13 +151,22 @@ public static class UpdateCheck
             if (!Uri.TryCreate(url.GetString(), UriKind.Absolute, out Uri? address) || !IsReleasePage(address)) return false;
 
             // Shown as the numbers it was compared by, so that nothing else from the answer reaches the screen.
-            (version, page) = (parsed.ToString(), address);
+            release = new ReleaseInfo(parsed.ToString(), IsPlainTag(tag.GetString()) ? tag.GetString() : null, address);
             return true;
         }
         catch (JsonException)
         {
             return false;
         }
+    }
+
+    /// <summary>Whether a tag is "v" and three numbers of at most four digits, which is all that goes into an address it is fetched from.</summary>
+    public static bool IsPlainTag(string? tag)
+    {
+        if (tag is null || tag.Length is < 6 or > 17 || tag[0] != 'v') return false;
+
+        string[] parts = tag[1..].Split('.');
+        return parts.Length == 3 && parts.All(part => part.Length is >= 1 and <= 4 && part.All(char.IsAsciiDigit));
     }
 
     /// <summary>Whether an address is one that may be opened as a release's page: https, on github.com itself.</summary>

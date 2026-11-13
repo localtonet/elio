@@ -27,6 +27,10 @@ internal static class Program
             return;
         }
 
+        // A copy started by an update waits for the old one to finish closing, so that it does not take that one for a
+        // copy to hand its launch to, and clears away what the update left.
+        UpdateInstaller.AfterUpdate(args);
+
         // A copy that is already running takes this launch as a request for a new tab.
         if (SingleInstance.TryHandOver()) return;
 

@@ -357,6 +357,7 @@ public partial class MainView : UserControl
         items.Add(new(L.T("Mark commands in this shell (bash, zsh, PowerShell)"), L.T("Pane"), Workspace.MarkCommandsInActive));
         items.Add(new(L.T("Take a picture of this terminal"), L.T("Pane"), Workspace.TakePictureOfActive));
         items.Add(new(L.T("Command history"), L.T("Pane"), () => _ = Workspace.ShowHistoryAsync()));
+        if (!AppServices.MobileLayout) items.Add(new(L.T("Check for updates"), L.T("App"), () => _ = UpdateCheck.CheckNowAsync(Workspace)));
         items.AddRange(PluginItems());
         items.AddRange(HostList.Snippets.Select(s => new PaletteItem(s.Name, L.T("Command"), () => Workspace.TypeInActive(s.Command))));
         items.AddRange(HostItems());

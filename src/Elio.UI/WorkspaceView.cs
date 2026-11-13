@@ -791,38 +791,70 @@ public sealed partial class WorkspaceView : UserControl
     /// Says, in a line above the terminals that takes nothing away from them, that a newer version can be had. It
     /// stays until it is closed or the page is opened, and asks for nothing.
     /// </summary>
-    public void ShowUpdateNotice(string version, Uri page)
+    public void ShowUpdateNotice(ReleaseInfo release)
     {
         // The address came from the network. It is looked at again here, where it is about to be used.
-        if (!UpdateCheck.IsReleasePage(page)) return;
+        if (!UpdateCheck.IsReleasePage(release.Page)) return;
 
         var open = new Button { Content = L.T("Open the download page"), Padding = new Thickness(10, 2), FontSize = ElioStyle.SmallFontSize, CornerRadius = new CornerRadius(6), Tag = "update-open" };
-        Button dismiss = ElioStyle.IconButton(ElioStyle.Icon(ElioStyle.IconClose, ElioColors.TextMuted, 10, 2), L.T("Not now"), 22);
-        dismiss.Margin = new Thickness(4, 0, 0, 0);
-        dismiss.Tag = "update-dismiss";
+        Button dismiss = CloseButton("update-dismiss", L.T("Not now"));
         open.Click += async (_, _) =>
         {
             _updateBar.IsVisible = false;
-            await AppServices.OpenUrlAsync(this, page);
+            await AppServices.OpenUrlAsync(this, release.Page);
         };
-        dismiss.Click += (_, _) => _updateBar.IsVisible = false;
 
-        _updateBar.Background = ElioColors.Elevated;
-        _updateBar.BorderBrush = ElioColors.Border;
-        _updateBar.BorderThickness = new Thickness(1);
-        _updateBar.CornerRadius = new CornerRadius(ElioStyle.ControlRadius);
-        _updateBar.Margin = new Thickness(2 * ContentPane.PaneMargin, 0, 2 * ContentPane.PaneMargin, ContentPane.PaneMargin);
-        _updateBar.Padding = new Thickness(12, 4, 4, 4);
-        _updateBar.Child = new DockPanel
+        var buttons = new List<Control> { dismiss, open };
+
+        // Where this copy can replace itself, the notice offers to, and the page becomes the place to read what changed.
+        if (release.Tag is not null && UpdateInstaller.CanInstall())
         {
-            Children =
-            {
-                DockRight(dismiss),
-                DockRight(open),
-                new TextBlock { Text = L.T("Elio {0} is available.", version), Foreground = ElioColors.Text, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
-            },
-        };
-        _updateBar.IsVisible = true;
+            var install = new Button { Content = L.T("Update and restart"), Padding = new Thickness(10, 2), FontSize = ElioStyle.SmallFontSize, CornerRadius = new CornerRadius(6), Tag = "update-install" };
+            install.Click += (_, _) => _ = InstallUpdateAsync(release);
+            open.Content = L.T("Release notes");
+            buttons.Add(install);
+        }
+
+        ShowBar(L.T("Elio {0} is available.", release.Version), buttons);
+    }
+
+    /// <summary>
+    /// Downloads a release, checks it and swaps it for the running program, with the progress in the line above the
+    /// terminals, and then restarts Elio. Open tabs come back as they do after any restart. Nothing changes if any
+    /// step fails: the line says what went wrong and offers the download page instead.
+    /// </summary>
+    private async Task InstallUpdateAsync(ReleaseInfo release)
+    {
+        ShowBar(L.T("Downloading Elio {0}…", release.Version), []);
+        int shown = -1;
+        var progress = new Progress<double>(fraction =>
+        {
+            // The line is made again for each whole percent, not for each piece that arrives.
+            int percent = (int)(fraction * 100);
+            if (percent == shown) return;
+
+            shown = percent;
+            ShowBar(L.T("Downloading Elio {0}… {1}%", release.Version, percent), []);
+        });
+        try
+        {
+            await UpdateInstaller.InstallAsync(release, UpdateCheck.Running ?? new Version(0, 0), progress, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is UpdateException or IOException or UnauthorizedAccessException)
+        {
+            ShowNotice(L.T("Could not update Elio: {0}", ex.Message), L.T("Open the download page"), () => _ = AppServices.OpenUrlAsync(this, release.Page));
+            return;
+        }
+
+        // The new version is in place. If it cannot be started from here, it is there for the next time Elio is opened.
+        if (!UpdateInstaller.Relaunch())
+        {
+            ShowNotice(L.T("Elio {0} is installed. Close Elio and open it again to use it.", release.Version));
+            return;
+        }
+
+        ShowBar(L.T("Restarting Elio…"), []);
+        (Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.Shutdown();
     }
 
     /// <summary>
@@ -832,15 +864,33 @@ public sealed partial class WorkspaceView : UserControl
     public void ShowNotice(string text, string actionText, Action action)
     {
         var act = new Button { Content = actionText, Padding = new Thickness(10, 2), FontSize = ElioStyle.SmallFontSize, CornerRadius = new CornerRadius(6), Tag = "notice-action" };
-        Button dismiss = ElioStyle.IconButton(ElioStyle.Icon(ElioStyle.IconClose, ElioColors.TextMuted, 10, 2), L.T("Close"), 22);
-        dismiss.Margin = new Thickness(4, 0, 0, 0);
-        dismiss.Tag = "notice-dismiss";
         act.Click += (_, _) =>
         {
             _updateBar.IsVisible = false;
             action();
         };
+
+        ShowBar(text, [CloseButton("notice-dismiss", L.T("Close")), act]);
+    }
+
+    /// <summary>The same with nothing to do about it: something to read, and a button to close it.</summary>
+    public void ShowNotice(string text) => ShowBar(text, [CloseButton("notice-dismiss", L.T("Close"))]);
+
+    private Button CloseButton(string tag, string tip)
+    {
+        Button dismiss = ElioStyle.IconButton(ElioStyle.Icon(ElioStyle.IconClose, ElioColors.TextMuted, 10, 2), tip, 22);
+        dismiss.Margin = new Thickness(4, 0, 0, 0);
+        dismiss.Tag = tag;
         dismiss.Click += (_, _) => _updateBar.IsVisible = false;
+        return dismiss;
+    }
+
+    /// <summary>Puts a line of text in the bar above the terminals, with buttons docked to its right, the first one outermost.</summary>
+    private void ShowBar(string text, IReadOnlyList<Control> buttons)
+    {
+        var row = new DockPanel();
+        foreach (Control button in buttons) row.Children.Add(DockRight(button));
+        row.Children.Add(new TextBlock { Text = text, Foreground = ElioColors.Text, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
 
         _updateBar.Background = ElioColors.Elevated;
         _updateBar.BorderBrush = ElioColors.Border;
@@ -848,15 +898,7 @@ public sealed partial class WorkspaceView : UserControl
         _updateBar.CornerRadius = new CornerRadius(ElioStyle.ControlRadius);
         _updateBar.Margin = new Thickness(2 * ContentPane.PaneMargin, 0, 2 * ContentPane.PaneMargin, ContentPane.PaneMargin);
         _updateBar.Padding = new Thickness(12, 4, 4, 4);
-        _updateBar.Child = new DockPanel
-        {
-            Children =
-            {
-                DockRight(dismiss),
-                DockRight(act),
-                new TextBlock { Text = text, Foreground = ElioColors.Text, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
-            },
-        };
+        _updateBar.Child = row;
         _updateBar.IsVisible = true;
     }
 
