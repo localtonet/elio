@@ -4,4 +4,8 @@
     <loc>https://elio.sh/</loc>
     <changefreq>monthly</changefreq>
   </url>
+  <url>
+    <loc>https://elio.sh/privacy.html</loc>
+    <changefreq>yearly</changefreq>
+  </url>
 </urlset>

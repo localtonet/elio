@@ -6,5 +6,15 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- A release build takes its version from the tag: -p:Version=1.2.3 -->
     <Version>0.1.0</Version>
+    <!--
+      What Windows shows under Properties > Details, and what a code signing service checks before it signs: the
+      product name is the project's name and the product version is exactly the version, with no commit hash behind it.
+    -->
+    <Product>Elio</Product>
+    <Company>The Elio Authors</Company>
+    <Authors>The Elio Authors</Authors>
+    <Copyright>Copyright 2026 The Elio Authors</Copyright>
+    <Description>A fast, free and open-source terminal and SSH client.</Description>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 </Project>

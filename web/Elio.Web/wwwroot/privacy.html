@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy policy · Elio</title>
+  <meta name="description" content="What Elio sends over the network, to whom and when. There is no telemetry: the few requests it makes are listed here.">
+  <link rel="canonical" href="https://elio.sh/privacy.html">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0E1116" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FBFAF7" media="(prefers-color-scheme: light)">
+
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <svg class="sprite" aria-hidden="true" focusable="false" width="0" height="0">
+    <symbol id="mark" viewBox="0 0 64 64">
+      <path class="mark-line" d="M17 22 27 32 17 42" fill="none" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path class="mark-sun-line" d="M43 19v4M34.500 22.500 37 25M51.500 22.500 49 25" fill="none" stroke-width="3" stroke-linecap="round"/>
+      <path class="mark-sun" d="M34 37a9 9 0 0 1 18 0z"/>
+      <rect class="mark-fill" x="32.500" y="40" width="21" height="4" rx="2"/>
+    </symbol>
+  </svg>
+
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="./" aria-label="Elio, back to the start">
+        <svg class="mark" width="30" height="30" aria-hidden="true"><use href="#mark"/></svg>
+        <span class="wordmark">elio</span>
+      </a>
+      <nav class="site-nav" aria-label="Sections">
+        <a href="./#why">Why Elio</a>
+        <a href="./#features">Features</a>
+        <a href="./#security">Security</a>
+        <a href="./#open-source">Open source</a>
+        <a href="./#download">Download</a>
+      </nav>
+      <a class="button small primary header-cta" href="./#download">Download</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page">
+      <div class="wrap">
+        <p class="eyebrow">privacy</p>
+        <h1>Privacy policy</h1>
+        <p class="lead">Elio has no telemetry. This page lists the few times it talks to anything other than the servers you told it to connect to, and what it says.</p>
+
+        <div class="prose">
+          <h2 id="short">The short version</h2>
+          <ul>
+            <li>No telemetry, no analytics, no crash reports, no advertising and no account of its own.</li>
+            <li>Your servers, passwords, keys, snippets and settings stay on your device. Passwords and keys are never written to logs.</li>
+            <li>Nothing leaves your device except what is listed under <a href="#network">When Elio uses the network</a>. Most of it happens only if you turn a feature on.</li>
+          </ul>
+
+          <h2 id="device">What stays on your device</h2>
+          <p>Elio keeps its settings, your server library, snippets, identities, known host keys, workspaces and command history in its data folder: <code>%LOCALAPPDATA%\Elio</code> on Windows, the usual application folder on macOS and Linux, a folder of its own on a phone, or the folder named <code>data</code> beside the program in portable mode. Saved passwords and passphrases are in a vault encrypted with a key that the operating system holds.</p>
+          <p>Command suggestions are worked out on your device from commands you ran before and from the shell's history file. They are not sent anywhere.</p>
+
+          <h2 id="network">When Elio uses the network</h2>
+          <ul>
+            <li><strong>The servers you connect to.</strong> SSH, SFTP, Telnet and Mosh servers, serial ports, jump hosts and proxies are the ones you added. They receive what you type and what you transfer, as with any terminal.</li>
+            <li><strong>The version check (computers only).</strong> At most once a day Elio asks GitHub's API for the latest release of <code>localtonet/elio</code> and tells you if there is a newer one. Nothing about you or your servers is sent beyond the request itself, which GitHub sees as it sees any other, including your network address (see <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">GitHub's privacy statement</a>). <strong>Check for new versions when Elio starts</strong> in Settings turns it off. Phones do not make this request.</li>
+            <li><strong>Sync (only if you turn it on).</strong> Everything is encrypted on your device with a key made from your password before it leaves, so the sync server, <code>sync.elio.sh</code> by default or one of your own, stores ciphertext only. It cannot read it. Like any server it receives the network address of each request, which it uses to limit abuse, and it holds the sync code, or the Localtonet account, that says whose data it is, together with the size and time of what is stored. The server is open source and <a href="./#self-host">can be run by you</a>.</li>
+            <li><strong>Shared terminals (only if you share one).</strong> The stream is encrypted from end to end with a key made from the password you give the viewer. The relay, the same sync server unless you chose another in Settings, passes on bytes it cannot read, and sharing ends when you stop it.</li>
+            <li><strong>Localtonet (only if you sign in).</strong> Signing in lists your Localtonet devices and lets Elio connect to them. What Localtonet receives and keeps is governed by Localtonet's own terms and privacy policy at <a href="https://localtonet.com" rel="noopener">localtonet.com</a>. The key Elio is given can only list devices and prove your identity to the sync server.</li>
+            <li><strong>Importing from DigitalOcean or AWS (only when you run it).</strong> The token or access key you type goes to that provider only. It is kept only if you tick <strong>Remember in the vault</strong>.</li>
+            <li><strong>Links and plugins.</strong> A web address you Ctrl+click opens in your browser. A plugin is a program you installed yourself and runs under its own rules; Elio never gives plugins passwords or keys.</li>
+            <li><strong>AI tools (only if you allow them).</strong> A tool started with <code>elio --mcp</code> sees the names and addresses of your servers, never passwords or keys, and can run commands only where you allowed it twice. What runs is written to <code>mcp-commands.log</code> and <code>mcp-activity.jsonl</code> in the data folder on your device.</li>
+          </ul>
+
+          <h2 id="phone">On a phone</h2>
+          <p>Elio asks for the camera only to read the QR code that adds the device to sync, and keeps no picture. The app lock uses the device's own fingerprint, face or passcode check; Elio never receives that data. On Android Elio holds the permissions for internet access and the camera. On iOS it asks to use the local network so that it can reach servers on your own network.</p>
+
+          <h2 id="website">This website</h2>
+          <p>elio.sh is a handful of static files with no cookies, no analytics and no requests to other sites. Like any web server, the host of elio.sh receives the network address and browser details of each request. Downloads are served by GitHub, under <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">its privacy statement</a>.</p>
+
+          <h2 id="control">Your choices</h2>
+          <ul>
+            <li>Turn off the version check, sync, sharing, Localtonet sign-in and AI tools in Settings. Each one is off until you use it, except the version check.</li>
+            <li>Delete Elio's data folder to remove everything it keeps on your device.</li>
+            <li>Run your own sync server if you would rather not use <code>sync.elio.sh</code>.</li>
+          </ul>
+
+          <h2 id="contact">Questions and changes</h2>
+          <p>Ask on <a href="https://github.com/localtonet/elio/issues">the issue tracker</a>. Security problems go through the private route in <a href="https://github.com/localtonet/elio/blob/main/SECURITY.md">SECURITY.md</a>. When this policy changes, the change is visible in <a href="https://github.com/localtonet/elio/commits/main/web/Elio.Web/wwwroot/privacy.html">the repository's history</a>.</p>
+          <p class="updated">Last updated 13 November 2026.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-row">
+      <div class="footer-brand">
+        <a class="brand" href="./" aria-label="Elio, back to the start">
+          <svg class="mark" width="30" height="30" aria-hidden="true"><use href="#mark"/></svg>
+          <span class="wordmark">elio</span>
+        </a>
+        <p>A fast, free and open-source terminal and SSH client.</p>
+        <p>Licensed under the Apache License 2.0.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/localtonet/elio">Source</a>
+        <a href="./#self-host">Sync server docs</a>
+        <a href="https://github.com/localtonet/elio/releases">Releases</a>
+        <a href="privacy.html" aria-current="page">Privacy</a>
+        <a href="./#code-signing">Code signing policy</a>
+      </nav>
+      <div class="footer-note">
+        <p>Elio works on its own; <a href="https://localtonet.com" rel="noopener">Localtonet</a> adds reaching computers behind a router.</p>
+        <p>No tracking on this site.</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

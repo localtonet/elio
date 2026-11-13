@@ -17,6 +17,8 @@ Website: [elio.sh](https://elio.sh)
 - [Features](#features): [Terminal](#terminal) · [Connections](#connections) · [Servers](#servers) · [Many servers at once](#many-servers-at-once) · [Files](#files) · [Sharing a terminal](#sharing-a-terminal) · [Sync](#sync) · [Localtonet](#localtonet-optional) · [AI tools](#for-ai-tools) · [Plugins](#plugins) · [Languages](#languages) · [On a phone](#on-a-phone)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Security](#security)
+- [Privacy](#privacy)
+- [Code signing policy](#code-signing-policy)
 - [Building from source](#building-from-source)
 - [Running your own sync server](#running-your-own-sync-server)
 - [The website](#the-website)
@@ -308,6 +310,30 @@ A few keys belong to the terminal itself: the right arrow accepts a suggestion a
 - The only request Elio makes on its own is a version check: on a computer, at most once a day, it asks GitHub for the latest release and tells you if there is a newer one. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
 
 Found a security problem? [SECURITY.md](SECURITY.md) says how to report it privately.
+
+## Privacy
+
+Elio has no telemetry, no analytics, no crash reports and no account of its own. Your servers, passwords, keys and settings stay on your device. Apart from the servers you connect to, it talks to the network only in these cases:
+
+- **The version check** (computers only): at most once a day it asks GitHub for the latest release. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
+- **Sync**, if you turn it on: encrypted on your device first, so the sync server stores ciphertext it cannot read.
+- **Shared terminals**, if you share one: encrypted from end to end, passed along by the sync server.
+- **Localtonet**, if you sign in, and **cloud imports**, when you run one: the account or token goes to that provider only.
+- **AI tools**, if you allow them: they see server names, never passwords or keys.
+
+The full policy, including what the phone apps ask the device for, is at [elio.sh/privacy.html](https://elio.sh/privacy.html) (source: [web/Elio.Web/wwwroot/privacy.html](web/Elio.Web/wwwroot/privacy.html)).
+
+## Code signing policy
+
+Elio's Windows program is signed with a code signing certificate, so that Windows can show who published it. Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+> **Not signed yet.** This is the policy that applies once SignPath Foundation has accepted the project. Until then Windows builds are unsigned, and Windows may warn before it runs one. Every release lists its SHA-256 in `SHA256SUMS`.
+
+- **Committers and reviewers:** the [members of the localtonet organization](https://github.com/orgs/localtonet/people). Every change from someone who is not a committer is reviewed before it is merged.
+- **Approvers:** the [owners of the organization](https://github.com/orgs/localtonet/people?query=role%3Aowner). Each release has to be approved by one of them before it is signed.
+- **Privacy policy:** see [Privacy](#privacy) above.
+
+Only files built by [the release workflow](.github/workflows/release.yml) from the source in this repository are signed. Elio does not transfer any information to other networked systems unless you turn a feature on, apart from the version check described above.
 
 ## Building from source
 

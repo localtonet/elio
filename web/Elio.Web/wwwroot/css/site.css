@@ -350,6 +350,30 @@ p code, li code {
 .platforms .button { width: 100%; }
 .platforms .card p.alt { margin: 12px 0 0; font-size: .8438rem; }
 
+/* The code signing policy, in the download section */
+.policy {
+  display: grid; gap: 14px; max-width: 52rem; margin: 56px auto 0; padding: 28px;
+  border-radius: var(--radius); background: var(--bg); border: 1px solid var(--line);
+}
+.policy h3 { font-size: 1.375rem; letter-spacing: -.02em; }
+.policy p, .policy li { color: var(--muted); }
+.policy ul { display: grid; gap: 8px; }
+.policy li strong { color: var(--text); }
+.policy .status { padding: 12px 14px; border-radius: var(--radius-small); border: 1px dashed var(--line-strong); font-size: .9375rem; }
+
+/* Text pages: the privacy policy */
+.page { padding: 72px 0 96px; }
+.page .lead { max-width: 40em; }
+.prose { display: grid; gap: 16px; max-width: 44rem; margin-top: 48px; }
+.prose h2 { margin-top: 28px; max-width: none; font-size: 1.5rem; }
+.prose h2:first-child { margin-top: 0; }
+.prose p, .prose li { color: var(--muted); }
+.prose ul { display: grid; gap: 12px; padding-left: 1.25em; list-style: disc; }
+.prose li::marker { color: var(--accent); }
+.prose strong { color: var(--text); }
+.prose .updated { font-size: .875rem; }
+.footer-links a[aria-current="page"] { text-decoration-color: currentColor; }
+
 /* Footer */
 .site-footer { padding: 48px 0 56px; border-top: 1px solid var(--line); font-size: .9375rem; color: var(--muted); }
 .footer-row { display: grid; grid-template-columns: 1.3fr auto 1.2fr; gap: 48px; align-items: start; }

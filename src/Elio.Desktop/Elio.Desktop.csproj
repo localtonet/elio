@@ -3,6 +3,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>elio</AssemblyName>
+    <!-- The name Windows shows for the program, in the Task Manager for one. -->
+    <AssemblyTitle>Elio</AssemblyTitle>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>elio.ico</ApplicationIcon>
     <!-- A single-file publish carries the native libraries (Skia, HarfBuzz, ANGLE, ghostty-vt) inside the exe. -->

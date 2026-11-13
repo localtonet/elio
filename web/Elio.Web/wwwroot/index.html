@@ -512,6 +512,19 @@
           </li>
         </ul>
         <p class="fine center">Prefer to build it yourself? <a href="#build">Build from source</a>.</p>
+
+        <div class="policy" id="code-signing">
+          <h3>Code signing policy</h3>
+          <p>Elio's Windows program is signed with a code signing certificate, so that Windows can show who published it. Free code signing provided by <a href="https://signpath.io" rel="noopener">SignPath.io</a>, certificate by <a href="https://signpath.org" rel="noopener">SignPath Foundation</a>.</p>
+          <!-- Remove this paragraph when the first signed release is out. -->
+          <p class="status">Not signed yet. This is the policy that applies once SignPath Foundation has accepted the project. Until then Windows builds are unsigned, and Windows may warn before it runs one. Every release lists its SHA-256 in <code>SHA256SUMS</code> on the <a href="https://github.com/localtonet/elio/releases/latest">releases page</a>.</p>
+          <ul>
+            <li><strong>Committers and reviewers:</strong> <a href="https://github.com/orgs/localtonet/people">members of the localtonet organization on GitHub</a>. Every change from someone who is not a committer is reviewed before it is merged.</li>
+            <li><strong>Approvers:</strong> <a href="https://github.com/orgs/localtonet/people?query=role%3Aowner">the owners of the organization</a>. Each release has to be approved by one of them before it is signed.</li>
+            <li><strong>Privacy policy:</strong> <a href="privacy.html">what Elio sends over the network, and when</a>.</li>
+          </ul>
+          <p class="fine">Only files built by <a href="https://github.com/localtonet/elio/blob/main/.github/workflows/release.yml">the public release workflow</a> from the source in this repository are signed. The program does not transfer any information to other networked systems unless you turn a feature on, apart from the daily check for a new version, which can be turned off in Settings.</p>
+        </div>
       </div>
     </section>
   </main>
@@ -530,6 +543,8 @@
         <a href="https://github.com/localtonet/elio">Source</a>
         <a href="#self-host">Sync server docs</a>
         <a href="https://github.com/localtonet/elio/releases">Releases</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="#code-signing">Code signing policy</a>
       </nav>
       <div class="footer-note">
         <p>Elio works on its own; <a href="https://localtonet.com" rel="noopener">Localtonet</a> adds reaching computers behind a router.</p>
