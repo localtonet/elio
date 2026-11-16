@@ -203,6 +203,40 @@ public sealed partial class DialogHost : Panel
 
     private static StackPanel Field(string label, Control input) => new() { Children = { Label(label), input } };
 
+    /// <summary>
+    /// The box that lets AI tools run commands on one server is one of two switches, and the other one is in Settings.
+    /// Ticked with that one off it would look allowed and do nothing, so the form says so and offers to turn the
+    /// other on from here.
+    /// </summary>
+    /// <returns>The note to put under the box, and the box that asks for Settings to be switched on too.</returns>
+    private static (Control Note, CheckBox Everywhere) McpSettingsNote(CheckBox mcpCommands)
+    {
+        CheckBox everywhere = Check(L.T("Switch it on in Settings too"), false, "mcp-everywhere");
+        var note = new StackPanel
+        {
+            Spacing = 4,
+            Margin = new Thickness(26, 0, 0, 0),
+            Children =
+            {
+                new TextBlock { Text = L.T("This does nothing yet: running commands is switched off for all AI tools in Settings."), Foreground = ElioColors.Accent, TextWrapping = TextWrapping.Wrap, FontSize = 12 },
+                everywhere,
+            },
+        };
+        void Show() => note.IsVisible = mcpCommands.IsChecked == true && !AppServices.Settings.McpRunCommands;
+        mcpCommands.IsCheckedChanged += (_, _) => Show();
+        Show();
+        return (note, everywhere);
+    }
+
+    /// <summary>Asked for on the very form, with the reason in front of the user: the other half of the permission.</summary>
+    private static void SwitchOnMcpInSettings(CheckBox mcpCommands, CheckBox everywhere)
+    {
+        if (mcpCommands.IsChecked != true || everywhere.IsChecked != true || AppServices.Settings.McpRunCommands) return;
+
+        AppServices.Settings.McpRunCommands = true;
+        AppServices.SaveSettings();
+    }
+
     private static void SubmitOnEnter(Control input, Action submit) => input.KeyDown += (_, e) =>
     {
         if (e.Key != Key.Enter) return;
@@ -396,22 +430,7 @@ public sealed partial class DialogHost : Panel
         CheckBox forwardAgent = Check(L.T("Let the server use my SSH agent (agent forwarding)"), existing?.ForwardAgent == true, "forward-agent");
         CheckBox mcpCommands = Check(L.T("AI tools may run commands on this server"), existing?.AllowMcpCommands == true, "mcp-commands");
 
-        // The box above is one of two switches, and the other one is in Settings. Ticked with that one off it
-        // would look allowed and do nothing, so the form says so and offers to turn the other on from here.
-        CheckBox mcpEverywhere = Check(L.T("Switch it on in Settings too"), false, "mcp-everywhere");
-        var mcpNote = new StackPanel
-        {
-            Spacing = 4,
-            Margin = new Thickness(26, 0, 0, 0),
-            Children =
-            {
-                new TextBlock { Text = L.T("This does nothing yet: running commands is switched off for all AI tools in Settings."), Foreground = ElioColors.Accent, TextWrapping = TextWrapping.Wrap, FontSize = 12 },
-                mcpEverywhere,
-            },
-        };
-        void ShowMcpNote() => mcpNote.IsVisible = mcpCommands.IsChecked == true && !AppServices.Settings.McpRunCommands;
-        mcpCommands.IsCheckedChanged += (_, _) => ShowMcpNote();
-        ShowMcpNote();
+        (Control mcpNote, CheckBox mcpEverywhere) = McpSettingsNote(mcpCommands);
         CheckBox forwardX11 = Check(L.T("Show the server's graphical programs here (X11 forwarding)"), existing?.ForwardX11 == true, "forward-x11");
         var mosh = new InheritableCheck(L.T("Use Mosh, which survives sleep and changing networks (the server needs mosh-server)"), existing?.UseMosh == true, "mosh");
         CheckBox reconnect = Check(L.T("Reconnect automatically if the connection drops"),existing?.AutoReconnect ?? true, "reconnect");
@@ -549,12 +568,7 @@ public sealed partial class DialogHost : Panel
                 parsedForwards.Add(forward);
             }
 
-            // Asked for on this very form, with the reason in front of the user: the other half of the permission.
-            if (ssh && mcpCommands.IsChecked == true && mcpEverywhere.IsChecked == true && !AppServices.Settings.McpRunCommands)
-            {
-                AppServices.Settings.McpRunCommands = true;
-                AppServices.SaveSettings();
-            }
+            if (ssh) SwitchOnMcpInSettings(mcpCommands, mcpEverywhere);
 
             var entry = new HostEntry
             {

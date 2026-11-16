@@ -183,7 +183,8 @@ public sealed class LocaltonetPanel : UserControl
         LocaltonetDevice? details = AppServices.Localtonet.Details(device.Id);
         bool online = details?.Online == true;
         bool keyed = AppServices.Vault.Get(device.Id) is not null;
-        string about = string.Join("  ·  ", new[] { online ? L.T("online") : L.T("offline"), details?.Os, keyed ? L.T("key saved") : null }.Where(s => !string.IsNullOrEmpty(s)));
+        // A device the user named something else still shows what Localtonet calls it, so the two can be told apart.
+        string about = string.Join("  ·  ", new[] { online ? L.T("online") : L.T("offline"), details?.Os, DeviceEntries.IsRenamed(device) ? device.Address : null, keyed ? L.T("key saved") : null }.Where(s => !string.IsNullOrEmpty(s)));
 
         var row = new Border
         {
@@ -237,6 +238,7 @@ public sealed class LocaltonetPanel : UserControl
                 Item(L.T("Connect"), () => ConnectRequested?.Invoke(device)),
                 Item(L.T("Open files"), () => FilesRequested?.Invoke(device)),
                 Item(L.T("Open files with another server…"), () => FilesWithAnotherRequested?.Invoke(device)),
+                Item(L.T("Edit"), () => _ = EditAsync(device)),
                 Item(L.T("Enter access key…"), () => _ = EnterKeyAsync(device)),
                 Item(L.T("Delete access key"), () =>
                 {
@@ -252,6 +254,14 @@ public sealed class LocaltonetPanel : UserControl
     {
         DockPanel.SetDock(control, Dock.Left);
         return control;
+    }
+
+    private async Task EditAsync(HostEntry device)
+    {
+        DeviceEdit? edit = await _dialogs.EditDeviceAsync(device, AppServices.Vault.Get(device.Id) is not null);
+        if (edit is null) return;
+
+        AppServices.Localtonet.Customize(device, edit.Name, edit.AllowMcpCommands);
     }
 
     private async Task EnterKeyAsync(HostEntry device)

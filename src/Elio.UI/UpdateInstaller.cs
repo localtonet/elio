@@ -48,8 +48,19 @@ public static class UpdateInstaller
         // The package manager owns what it put under /usr, and a program there is replaced by installing a newer package.
         if (target.Archive == UpdateArchive.TarGz && program.StartsWith("/usr/", StringComparison.Ordinal)) return false;
 
+        // winget and Scoop keep a record of what they installed, and replacing the file under them leaves it wrong.
+        if (target.Archive == UpdateArchive.Zip && IsWindowsPackageManagerPath(program)) return false;
+
         string? folder = target.Archive == UpdateArchive.MacApp ? BundleParent(program) : Path.GetDirectoryName(program);
         return folder is not null && UpdateFiles.CanWriteTo(folder);
+    }
+
+    /// <summary>Whether a program lives where winget (portable packages) or Scoop put what they install.</summary>
+    internal static bool IsWindowsPackageManagerPath(string program)
+    {
+        string path = program.Replace('/', '\\');
+        return path.Contains(@"\Microsoft\WinGet\Packages\", StringComparison.OrdinalIgnoreCase)
+            || path.Contains(@"\scoop\apps\", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

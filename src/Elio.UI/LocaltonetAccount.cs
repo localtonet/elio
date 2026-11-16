@@ -274,6 +274,23 @@ public sealed class LocaltonetAccount
     /// <summary>The devices of one account.</summary>
     public IEnumerable<HostEntry> DevicesOf(LocaltonetLogin account) => _cache.Devices.Where(d => (d.LocaltonetAccountId ?? string.Empty) == account.Id);
 
+    /// <summary>
+    /// Gives a device the name it is shown under here and says whether AI tools may run commands on it. Both stay
+    /// on this computer: Localtonet is not told, and the device keeps its own name there.
+    /// </summary>
+    public void Customize(HostEntry device, string? name, bool allowMcpCommands)
+    {
+        // The list may have been refreshed while the dialog was open, which leaves the entry it was opened for behind.
+        DeviceEntries.Customize(_cache.Devices.FirstOrDefault(d => d.Id == device.Id) ?? device, name, allowMcpCommands);
+
+        // A new name can change where the device belongs in its account's list.
+        List<HostEntry> sorted = [.. _cache.Devices.GroupBy(d => d.LocaltonetAccountId ?? string.Empty).SelectMany(g => g.OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase))];
+        _cache.Devices.Clear();
+        _cache.Devices.AddRange(sorted);
+        _store.Save(_cache);
+        Notify();
+    }
+
     /// <summary>Asks Localtonet for each account's current device list.</summary>
     public async Task RefreshAsync()
     {
@@ -289,23 +306,10 @@ public sealed class LocaltonetAccount
             {
                 IReadOnlyList<LocaltonetDevice> devices = await Api.ListDevicesAsync(key, CancellationToken.None);
 
-                // The entries are rebuilt from the list, but keep their ids so saved access keys and tabs still match.
-                foreach (LocaltonetDevice device in devices.OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase))
-                {
-                    details[device.Id] = device;
-                    entries.Add(new HostEntry
-                    {
-                        Id = device.Id,
-                        Name = device.Name,
-                        Address = device.Name,
-                        User = device.RunAsUser ?? "device",
-                        Localtonet = true,
-                        LocaltonetAccountId = account.Id,
-
-                        // Without an access key every new connection is approved in the browser, which shouldn't pop up by itself.
-                        AutoReconnect = AppServices.Vault.Get(device.Id) is not null,
-                    });
-                }
+                // The entries are rebuilt from the list, but keep their ids so saved access keys and tabs still match,
+                // and what the user decided about each device here (its name, whether AI tools may use it) carries over.
+                foreach (LocaltonetDevice device in devices) details[device.Id] = device;
+                entries.AddRange(DeviceEntries.Build(devices, account.Id, DevicesOf(account).ToDictionary(known => known.Id), id => AppServices.Vault.Get(id) is not null));
             }
             catch (LocaltonetSignedOutException ex)
             {

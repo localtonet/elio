@@ -466,6 +466,12 @@ public sealed class UpdateCheckReleaseTests
             // A package manager's folder is left to the package manager.
             var tar = new UpdateTarget("elio-linux-x64.tar.gz", "elio", UpdateArchive.TarGz);
             Assert.False(UpdateInstaller.CanInstall(tar, "/usr/bin/elio", hasKey: true, singleFile: true));
+
+            // So are winget's and Scoop's, wherever the folder is.
+            Assert.True(UpdateInstaller.IsWindowsPackageManagerPath(@"C:\Users\a\AppData\Local\Microsoft\WinGet\Packages\Localtonet.Elio_x\elio.exe"));
+            Assert.True(UpdateInstaller.IsWindowsPackageManagerPath(@"C:\Users\a\scoop\apps\elio\current\elio.exe"));
+            Assert.False(UpdateInstaller.IsWindowsPackageManagerPath(@"C:\Tools\Elio\elio.exe"));
+            Assert.False(UpdateInstaller.CanInstall(zip, Path.Combine(folder, "scoop", "apps", "elio", "elio.exe"), hasKey: true, singleFile: true));
         }
         finally
         {

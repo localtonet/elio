@@ -36,6 +36,16 @@ Website: [elio.sh](https://elio.sh)
 
 **Get Elio.** Builds for Windows, macOS, Linux and Android are on the [releases page](https://github.com/localtonet/elio/releases/latest), each with its SHA-256 in `SHA256SUMS`. There is no build for iOS there yet: it has to be built and signed with your own Apple account. To build it yourself, see [Building from source](#building-from-source).
 
+**Or from a package manager.** Elio updates itself, so these only install it:
+
+```
+winget install Localtonet.Elio                              # Windows
+scoop bucket add localtonet https://github.com/localtonet/scoop-bucket && scoop install elio
+brew install --cask localtonet/tap/elio                     # macOS
+```
+
+On Linux, install the `.deb` from the releases page, or unpack the `.tar.gz`.
+
 **First run.** The window opens with the server list on the left and four ways to begin in the middle: **Local shell**, **Add server**, **Import OpenSSH config** and **Command palette**.
 
 ![The welcome screen, offering Local shell, Add server, Import OpenSSH config and Command palette](docs/screenshots/welcome-dark.webp)
@@ -218,6 +228,7 @@ To turn it on, open **Sync** from the sidebar or the palette. The window asks on
 - Run `localtonet --terminal enable` on a computer, press **Sign in with Localtonet** in the sidebar, and approve in the browser after checking that both show the same code. The computer appears in the list with its online state, and connects like any other server, files included.
 - **Several accounts** can be signed in at once (**Add another Localtonet account**).
 - **Access keys.** Opening a shell on a device takes your approval in the browser each time, or that device's access key. **Get access keys for all devices…** asks Localtonet for a key for every device in one approved step, for one, two, five or ten years, and keeps them in the vault, so connecting no longer asks. A key can also be entered or deleted for a single device from its right-click menu.
+- **Edit** in a device's right-click menu gives it a name of your own and decides whether AI tools may run commands on it (see below). Both are kept on this computer only: Localtonet is not told, and still knows the device by its own name, which is what connecting asks for. Clearing the name goes back to Localtonet's.
 
 ### For AI tools
 
@@ -225,10 +236,10 @@ Elio is also a [Model Context Protocol](https://modelcontextprotocol.io) server.
 
 | Tool | What it does |
 | --- | --- |
-| `list_servers` | Lists the servers saved in Elio: name, kind, address, user, group and tags. Never passwords or keys |
-| `run_command` | Runs one command over SSH on a saved server and returns its exit code and output |
+| `list_servers` | Lists the servers saved in Elio and your Localtonet devices: name, kind, address, user, group and tags. Never passwords or keys |
+| `run_command` | Runs one command over SSH on a saved server or a Localtonet device and returns its exit code and output |
 
-`run_command` is off until you tick **Let AI tools connected with "elio --mcp" run commands on your servers** in Settings, and then works only on the servers where you have also ticked **AI tools may run commands on this server** (edit the server, under **Advanced**). Even then it only works on servers you have already connected to from Elio yourself, so that their host key is trusted and their credentials are in the vault. A command may run for two minutes, and output beyond 64 KB is cut. Every command that is run is written to `mcp-commands.log` in Elio's data folder, with the time, the server and how it ended.
+`run_command` is off until you tick **Let AI tools connected with "elio --mcp" run commands on your servers** in Settings, and then works only on the servers where you have also ticked **AI tools may run commands on this server** (edit the server, under **Advanced**; for a Localtonet device, **Edit** in its right-click menu). Even then it only works on servers you have already connected to from Elio yourself, so that their host key is trusted and their credentials are in the vault. A Localtonet device needs its access key saved in the vault instead, because an AI tool cannot approve a connection in the browser; without one the command is refused, and a key that has lapsed is reported the same way. A command may run for two minutes, and output beyond 64 KB is cut. Every command that is run is written to `mcp-commands.log` in Elio's data folder, with the time, the server and how it ended.
 
 The tool runs in a process of its own, but the window you have open tells you about it. A line above the terminals says which command ran on which server, and **Show all** (or **Commands run by AI tools** in the palette) opens a column beside the terminals where every command appears as it starts, with its exit code, how long it took and what it printed. For that column the commands and their output are kept in `mcp-activity.jsonl` in the data folder, at most 32 KB for each command and about 1 MB in all; **Clear** in the column deletes the file. The server form says so when you allow a server while the switch in Settings is still off, and can turn that on with it.
 

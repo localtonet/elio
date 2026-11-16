@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Elio.Connections;
 using Elio.Core;
+using Elio.Localtonet;
 
 namespace Elio.Desktop;
 
@@ -15,6 +17,11 @@ namespace Elio.Desktop;
 /// servers Elio has connected to before: the password or key must already be saved, and the server's key
 /// already trusted. It never asks anyone anything, because there is nobody at this end to ask, so every
 /// command it runs is written to a log in the data folder instead.
+///
+/// The computers on the user's Localtonet accounts are servers too, switched on the same two ways. They are
+/// reached through Localtonet, and only with an access key saved in the vault: without one the connection has
+/// to be approved in the browser, which nobody here can do. Their key is the one Localtonet recorded when the
+/// computer was paired, so there is no host key to have trusted before.
 /// </remarks>
 internal static class McpServer
 {
@@ -148,7 +155,7 @@ internal static class McpServer
 
         writer.WriteStartObject();
         writer.WriteString("name", ListTool);
-        writer.WriteString("description", "Lists the servers saved in Elio: name, kind, address, user, group and tags. Never includes passwords or keys.");
+        writer.WriteString("description", "Lists the servers saved in Elio and the computers on its Localtonet accounts: name, kind, address, user, group and tags. Never includes passwords or keys.");
         writer.WriteStartObject("inputSchema");
         writer.WriteString("type", "object");
         writer.WriteStartObject("properties");
@@ -158,7 +165,7 @@ internal static class McpServer
 
         writer.WriteStartObject();
         writer.WriteString("name", RunTool);
-        writer.WriteString("description", "Runs one command over SSH on a saved server and returns its exit code and output. Works only if the user has allowed it in Elio's settings and for that server, and has connected to that server from Elio before. Every command is written to a log the user can read.");
+        writer.WriteString("description", "Runs one command over SSH on a saved server, or on a Localtonet device, and returns its exit code and output. Works only if the user has allowed it in Elio's settings and for that server, and has connected to that server from Elio before (a Localtonet device needs an access key saved in Elio instead). Every command is written to a log the user can read.");
         writer.WriteStartObject("inputSchema");
         writer.WriteString("type", "object");
         writer.WriteStartObject("properties");
@@ -206,30 +213,42 @@ internal static class McpServer
 
         // Read fresh each time: the user may have added a server or changed the setting since the last call.
         HostLibrary library = Stores.Hosts().Load();
+
+        // The computers on the user's Localtonet accounts, as the window last listed them.
+        IReadOnlyList<HostEntry> devices = Stores.Localtonet().Load().Devices;
         return name.GetString() switch
         {
-            ListTool => (ListServers(library), false),
-            RunTool => await RunCommandAsync(library, Argument("server"), Argument("command")).ConfigureAwait(false),
+            ListTool => (ListServers(library, devices), false),
+            RunTool => await RunCommandAsync(library, devices, Argument("server"), Argument("command")).ConfigureAwait(false),
             _ => null,
         };
     }
 
-    private static string ListServers(HostLibrary library)
+    private static string ListServers(HostLibrary library, IReadOnlyList<HostEntry> devices)
     {
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartArray();
-            foreach (HostEntry host in library.Hosts.OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase))
+            foreach (HostEntry host in library.Hosts.Concat(devices).OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase))
             {
                 writer.WriteStartObject();
                 writer.WriteString("name", host.Name);
                 writer.WriteString("kind", host.Kind.ToString().ToLowerInvariant());
                 writer.WriteString("address", host.Address);
-                // What the server really connects with, which its group or its identity may have supplied.
-                ResolvedHost resolved = ConnectionResolver.Resolve(host, library);
-                if (host.Kind is HostKind.Ssh or HostKind.Telnet) writer.WriteNumber("port", resolved.Port);
-                if (resolved.User.Length > 0) writer.WriteString("user", resolved.User);
+                if (host.Localtonet)
+                {
+                    // The address is what Localtonet calls the computer. It has no port or login of its own to name.
+                    writer.WriteString("via", "localtonet");
+                }
+                else
+                {
+                    // What the server really connects with, which its group or its identity may have supplied.
+                    ResolvedHost resolved = ConnectionResolver.Resolve(host, library);
+                    if (host.Kind is HostKind.Ssh or HostKind.Telnet) writer.WriteNumber("port", resolved.Port);
+                    if (resolved.User.Length > 0) writer.WriteString("user", resolved.User);
+                }
+
                 if (library.Groups.FirstOrDefault(g => g.Id == host.GroupId) is HostGroup group) writer.WriteString("group", group.Name);
                 if (host.Tags.Count > 0)
                 {
@@ -247,42 +266,60 @@ internal static class McpServer
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    private static async Task<(string Text, bool Failed)?> RunCommandAsync(HostLibrary library, string serverName, string command)
+    private static async Task<(string Text, bool Failed)?> RunCommandAsync(HostLibrary library, IReadOnlyList<HostEntry> devices, string serverName, string command)
     {
         if (!Stores.Settings().Load().McpRunCommands)
             return ("Running commands is turned off. The user can allow it in Elio under Settings.", true);
         if (serverName.Length == 0 || command.Length == 0) return ("Both a server and a command are needed.", true);
 
-        List<HostEntry> named = library.Hosts.Where(h => h.Name.Equals(serverName, StringComparison.OrdinalIgnoreCase)).ToList();
+        List<HostEntry> named = library.Hosts.Concat(devices).Where(h => h.Name.Equals(serverName, StringComparison.OrdinalIgnoreCase)).ToList();
         if (named.Count != 1) return (named.Count == 0 ? $"There is no server named \"{serverName}\"." : $"More than one server is named \"{serverName}\".", true);
 
         // The setting lets AI tools in at all; which servers they may touch is chosen one by one.
-        if (!named[0].AllowMcpCommands)
-            return ($"AI tools are not allowed to run commands on {named[0].Name}. The user can allow it in Elio: edit the server, open Advanced and tick \"AI tools may run commands on this server\".", true);
+        HostEntry target = named[0];
+        if (!target.AllowMcpCommands)
+        {
+            return (target.Localtonet
+                ? $"AI tools are not allowed to run commands on {target.Name}. The user can allow it in Elio: right-click the device in the Localtonet list, choose Edit and tick \"AI tools may run commands on this server\"."
+                : $"AI tools are not allowed to run commands on {target.Name}. The user can allow it in Elio: edit the server, open Advanced and tick \"AI tools may run commands on this server\".", true);
+        }
 
         var vault = new Vault();
-        var known = new KnownHosts();
-        var steps = new List<ResolvedHost>();
-        string? problem = AddToPath(named[0], library, vault, steps, []);
-        if (problem is not null) return (problem, true);
+        Func<CancellationToken, Task<CommandResult>> execute;
+        if (target.Localtonet)
+        {
+            // Without an access key the owner has to approve each connection in the browser, and there is nobody here to do that.
+            if (vault.Get(target.Id) is not { } accessKey)
+                return ($"No access key is saved for {target.Name}. The user has to add one in Elio: right-click the device in the Localtonet list and choose Enter access key, or Get access keys for all devices.", true);
 
-        // The same resolver the app's window uses: identities, group defaults and the proxy apply here too.
-        List<SshEndpoint> path = SshEndpoints.ForPath(steps, vault.Get);
+            execute = token => RunOnDeviceAsync(target, accessKey, command, token);
+        }
+        else
+        {
+            var known = new KnownHosts();
+            var steps = new List<ResolvedHost>();
+            string? problem = AddToPath(target, library, vault, steps, []);
+            if (problem is not null) return (problem, true);
+
+            // The same resolver the app's window uses: identities, group defaults and the proxy apply here too.
+            List<SshEndpoint> path = SshEndpoints.ForPath(steps, vault.Get);
+            execute = token => SshCommandRunner.RunAsync(
+                path,
+                command,
+                (endpoint, key) => known.Check(endpoint.Host, endpoint.Port, key.Fingerprint) == HostKeyStatus.Trusted,
+                token);
+        }
 
         // Nothing is run that cannot be written down afterwards.
         if (!CanRecord()) return ($"The command was not run, because it could not be recorded in {LogPath}.", true);
 
         string run = Guid.NewGuid().ToString("N");
-        Activity.Started(run, named[0].Name, command);
+        Activity.Started(run, target.Name, command);
 
         using var timeout = new CancellationTokenSource(CommandTimeout);
-        CommandResult result = await SshCommandRunner.RunAsync(
-            path,
-            command,
-            (endpoint, key) => known.Check(endpoint.Host, endpoint.Port, key.Fingerprint) == HostKeyStatus.Trusted,
-            timeout.Token).ConfigureAwait(false);
+        CommandResult result = await execute(timeout.Token).ConfigureAwait(false);
 
-        Record(named[0].Name, command, result.Failure is null ? $"exit {result.ExitCode}" : "failed");
+        Record(target.Name, command, result.Failure is null ? $"exit {result.ExitCode}" : "failed");
         Activity.Ended(run, result);
         if (result.Failure is not null) return (result.Failure, true);
 
@@ -290,6 +327,35 @@ internal static class McpServer
         if (result.Output.Length > 0) text.Append("\nstdout:\n").Append(Shorten(result.Output));
         if (result.Error.Length > 0) text.Append("\nstderr:\n").Append(Shorten(result.Error));
         return (text.ToString(), result.ExitCode != 0);
+    }
+
+    /// <summary>
+    /// Runs the command on a Localtonet device through its node, the way the window does. The access key either
+    /// opens the device or it does not: an approval page is never opened, so a key that has lapsed is a failure.
+    /// </summary>
+    private static async Task<CommandResult> RunOnDeviceAsync(HostEntry device, string accessKey, string command, CancellationToken cancellation)
+    {
+        long started = Stopwatch.GetTimestamp();
+        try
+        {
+            DeviceSession session = await LocaltonetConnect.RequestAsync(
+                new LocaltonetApi(LocaltonetApi.DefaultUrl),
+                device.Address,
+                accessKey,
+                _ => throw new UnauthorizedAccessException("The access key saved for this device is not valid any more. The user has to enter a new one in Elio."),
+                cancellation).ConfigureAwait(false);
+
+            await using LocaltonetLink link = await LocaltonetLink.OpenAsync(session, cancellation).ConfigureAwait(false);
+            return await SshCommandRunner.RunAsync([link.Endpoint], command, link.IsDeviceKey, cancellation).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            return new CommandResult(null, string.Empty, string.Empty, Stopwatch.GetElapsedTime(started), $"The command did not finish within {CommandTimeout.TotalMinutes:0} minutes and was stopped.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return new CommandResult(null, string.Empty, string.Empty, Stopwatch.GetElapsedTime(started), ex.Message);
+        }
     }
 
     /// <summary>
@@ -418,7 +484,7 @@ internal static class McpServer
     private static string? AddToPath(HostEntry host, HostLibrary library, Vault vault, List<ResolvedHost> path, HashSet<Guid> visiting)
     {
         if (host.Kind != HostKind.Ssh) return $"{host.Name} is not an SSH server.";
-        if (host.Localtonet) return $"{host.Name} is a Localtonet device, which this cannot reach.";
+        if (host.Localtonet) return $"{host.Name} is a Localtonet device, which cannot be a jump host.";
         if (!visiting.Add(host.Id)) return $"{host.Name} is in its own chain of jump hosts.";
 
         ResolvedHost resolved = ConnectionResolver.Resolve(host, library);

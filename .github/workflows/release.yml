@@ -3,6 +3,8 @@
 # Push a tag such as v1.2.3 to release. A tag with a hyphen (v1.2.3-beta.1) is published as a pre-release.
 # Running the workflow by hand builds everything and keeps the files as workflow artifacts, without a release.
 #
+# After a release, build/package-managers.sh feeds winget, Homebrew and Scoop: see the "packages" job at the end.
+#
 # The Android package is signed with the release key when these repository secrets exist, and with a
 # throwaway debug key otherwise (such a package installs, but cannot be updated by a later build):
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
@@ -291,3 +293,85 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Elio ${GITHUB_REF_NAME#v}" --generate-notes "${flags[@]}"
+
+  # Puts the release into the package managers: a Homebrew tap (localtonet/homebrew-tap), a Scoop bucket
+  # (localtonet/scoop-bucket) and winget (a pull request to microsoft/winget-pkgs). Each is skipped with a warning
+  # while its secret is missing, and a pre-release is never offered. The manifests are made by
+  # build/package-managers.sh from the files the release has just published.
+  #   PACKAGES_TOKEN: a personal access token that can write to the two repositories above
+  #   WINGET_TOKEN: a classic personal access token with public_repo, from an account that has forked winget-pkgs
+  packages:
+    needs: release
+    if: ${{ !cancelled() && needs.release.result == 'success' && !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the published files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir dist
+          for name in elio-win-x64.zip elio-osx-arm64.zip elio-osx-x64.zip; do
+            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir dist || true
+          done
+          ls -l dist
+
+      - name: Write the manifests
+        run: sh build/package-managers.sh "${GITHUB_REF_NAME#v}" dist manifests
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-manifests
+          path: manifests
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Update the Homebrew tap and the Scoop bucket
+        env:
+          TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::No PACKAGES_TOKEN is configured, so the Homebrew tap and the Scoop bucket were not updated."
+            exit 0
+          fi
+          push() {
+            repository=$1 from=$2 to=$3
+            [ -e "$from" ] || { echo "::warning::Nothing to publish to $repository."; return 0; }
+            git clone --depth 1 "https://x-access-token:$TOKEN@github.com/$repository.git" "$RUNNER_TEMP/$to"
+            cp -R "$from"/. "$RUNNER_TEMP/$to/"
+            cd "$RUNNER_TEMP/$to"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git diff --cached --quiet || { git commit -m "elio ${GITHUB_REF_NAME#v}"; git push; }
+            cd "$GITHUB_WORKSPACE"
+          }
+          push localtonet/homebrew-tap manifests/homebrew homebrew-tap
+          push localtonet/scoop-bucket manifests/scoop scoop-bucket
+
+  winget:
+    needs: packages
+    if: ${{ !cancelled() && needs.packages.result == 'success' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-manifests
+          path: manifests
+
+      - name: Submit to winget-pkgs
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if (-not $env:WINGET_TOKEN) {
+            Write-Host "::warning::No WINGET_TOKEN is configured, so winget was not updated."
+            exit 0
+          }
+          if (-not (Test-Path manifests/winget)) {
+            Write-Host "::warning::This release has no Windows build, so winget was not updated."
+            exit 0
+          }
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          ./wingetcreate.exe submit --token $env:WINGET_TOKEN manifests/winget
