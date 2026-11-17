@@ -143,7 +143,7 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 
 **tmux, natively.** Run `tmux -CC` (or `tmux -CC attach`) on a server and its windows become Elio tabs and its panes Elio panes, with Elio's own scrolling, selection and splits. Detach, and they are waiting when you attach again from anywhere. This works over SSH and Telnet and in local shells on macOS and Linux; a local shell on Windows goes through the Windows console, which tmux cannot talk through.
 
-**Local shells.** Found automatically and listed under **This computer** in the sidebar: PowerShell, Command Prompt, WSL distributions, Git Bash, Cygwin, MSYS2 and Cmder on Windows; your login shell and the ones in `/etc/shells` elsewhere. A server of type local is a **profile**: your own command, starting folder and environment variables.
+**Local shells.** Found automatically and opened from the terminal button above the server list (right-click it for the others). While there is no server or device yet, they are also listed under **This computer** in the sidebar. They are PowerShell, Command Prompt, WSL distributions, Git Bash, Cygwin, MSYS2 and Cmder on Windows; your login shell and the ones in `/etc/shells` elsewhere. A server of type local is a **profile**: your own command, starting folder and environment variables.
 
 **Docker containers.** **Docker containers** in the palette lists the containers running on this computer and opens a shell in the one you pick.
 
@@ -227,7 +227,7 @@ To turn it on, open **Sync** from the sidebar or the palette. The window asks on
 
 - Run `localtonet --terminal enable` on a computer, press **Sign in with Localtonet** in the sidebar, and approve in the browser after checking that both show the same code. The computer appears in the list with its online state, and connects like any other server, files included.
 - **Several accounts** can be signed in at once (**Add another Localtonet account**).
-- **Access keys.** Opening a shell on a device takes your approval in the browser each time, or that device's access key. **Get access keys for all devices…** asks Localtonet for a key for every device in one approved step, for one, two, five or ten years, and keeps them in the vault, so connecting no longer asks. A key can also be entered or deleted for a single device from its right-click menu.
+- **Access keys.** Opening a shell on a device takes your approval in the browser each time, or that device's access key. **Get access keys for all devices…** asks Localtonet for a key for every device in one approved step, for one, two, five or ten years, and keeps them in the vault, so connecting no longer asks. A device added later has no key yet: after you approve a connection to it, Elio offers to get the keys. A key can also be entered or deleted for a single device from its right-click menu.
 - **Edit** in a device's right-click menu gives it a name of your own and decides whether AI tools may run commands on it (see below). Both are kept on this computer only: Localtonet is not told, and still knows the device by its own name, which is what connecting asks for. Clearing the name goes back to Localtonet's.
 
 ### For AI tools
@@ -322,7 +322,7 @@ A few keys belong to the terminal itself: the right arrow accepts a suggestion a
 - Plugins and AI tools never receive passwords or keys. An AI tool can run commands only where you allowed it twice, in Settings and on the server, and what it ran is shown in the window and written to a log.
 - On a phone, Elio can be locked behind the device's fingerprint, face or passcode.
 - No telemetry. Passwords and keys are never written to logs.
-- The only request Elio makes on its own is a version check: on a computer, at most once a day, it asks GitHub for the latest release and tells you if there is a newer one. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
+- The only request Elio makes on its own is a version check: on a computer, at most once every six hours, it asks GitHub for the latest release and tells you if there is a newer one. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
 - Updates are installed only when you press **Update and restart**, and only if they come from us. Each release carries a manifest (`update.json`) that lists its version and the SHA-256 of every file, signed with ECDSA (P-256) by a key that exists only in the release workflow's secrets. Elio checks the signature against the public keys built into the program ([`update-keys.txt`](src/Elio.Core/update-keys.txt)), the manifest against the version it was told about, and the downloaded file against the manifest, before it replaces anything. A file someone swapped on the releases page, or an older signed release served again, is refused. A copy built without a key in that file never installs anything by itself.
 
 Found a security problem? [SECURITY.md](SECURITY.md) says how to report it privately.
@@ -331,7 +331,7 @@ Found a security problem? [SECURITY.md](SECURITY.md) says how to report it priva
 
 Elio has no telemetry, no analytics, no crash reports and no account of its own. Your servers, passwords, keys and settings stay on your device. Apart from the servers you connect to, it talks to the network only in these cases:
 
-- **The version check** (computers only): at most once a day it asks GitHub for the latest release. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
+- **The version check** (computers only): at most once every six hours it asks GitHub for the latest release. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
 - **Updating**, when you press **Update and restart**: Elio downloads that release's files from github.com. Nothing about you or your servers is sent.
 - **Sync**, if you turn it on: encrypted on your device first, so the sync server stores ciphertext it cannot read.
 - **Shared terminals**, if you share one: encrypted from end to end, passed along by the sync server.

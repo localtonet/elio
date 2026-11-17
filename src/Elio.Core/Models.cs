@@ -474,7 +474,7 @@ public sealed class AppSettings : IVersionedFile
     /// <summary>Whether Elio asks GitHub at startup if there is a newer version. It is the only request it makes on its own.</summary>
     public bool CheckForUpdates { get; set; } = true;
 
-    /// <summary>When a newer version was last asked about, so that it is asked at most once a day.</summary>
+    /// <summary>When a newer version was last asked about, so that it is asked at most once every six hours.</summary>
     public DateTimeOffset? LastUpdateCheck { get; set; }
 
     /// <summary>The newest version the user has been told about, so that the same one is not announced twice.</summary>

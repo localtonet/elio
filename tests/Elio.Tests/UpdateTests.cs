@@ -446,6 +446,48 @@ public sealed class UpdateCheckReleaseTests
         Assert.False(UpdateCheck.TryReadRelease("nonsense", out _));
     }
 
+    [Theory]
+    [InlineData(0, 1, 5, 0, "0.1.5")]
+    [InlineData(1, 12, 3, 0, "1.12.3")]
+    [InlineData(0, 1, 0, 7, "0.1.0")]
+    public void Show_IsTheThreeNumbersOfTheRelease(int major, int minor, int build, int revision, string expected) =>
+        Assert.Equal(expected, UpdateCheck.Show(new Version(major, minor, build, revision)));
+
+    [Fact]
+    public void Show_VersionWithoutABuildNumber_CountsItAsZero()
+    {
+        Assert.Equal("1.2.0", UpdateCheck.Show(new Version(1, 2)));
+        Assert.Equal(string.Empty, UpdateCheck.Show(null));
+    }
+
+    private static readonly DateTimeOffset Noon =new(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void DueIn_NeverChecked_IsDueNow() =>
+        Assert.Equal(TimeSpan.Zero, UpdateCheck.DueIn(null, Noon));
+
+    [Fact]
+    public void DueIn_CheckedAMomentAgo_WaitsForTheRestOfTheInterval()
+    {
+        TimeSpan wait = UpdateCheck.DueIn(Noon.AddHours(-1), Noon);
+        Assert.True(wait > TimeSpan.Zero);
+
+        // The interval is hours, not a day: a release made since is heard of the same working day.
+        Assert.True(wait < TimeSpan.FromHours(6));
+        Assert.Equal(TimeSpan.Zero, UpdateCheck.DueIn(Noon.AddHours(-1), Noon.AddHours(6)));
+    }
+
+    [Fact]
+    public void DueIn_CheckedAWhileAgo_IsDueNow()
+    {
+        Assert.Equal(TimeSpan.Zero, UpdateCheck.DueIn(Noon.AddHours(-6), Noon));
+        Assert.Equal(TimeSpan.Zero, UpdateCheck.DueIn(Noon.AddDays(-3), Noon));
+    }
+
+    [Fact]
+    public void DueIn_ClockSetBackSinceTheLastCheck_DoesNotPutTheCheckOff() =>
+        Assert.Equal(TimeSpan.Zero, UpdateCheck.DueIn(Noon.AddDays(5), Noon));
+
     [Fact]
     public void CanInstall_OnlyWhereEverythingItNeedsIsThere()
     {

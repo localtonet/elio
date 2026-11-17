@@ -1660,10 +1660,12 @@ public sealed partial class WorkspaceView : UserControl
     private async Task<T> ConnectDeviceAsync<T>(HostEntry device, Action<string, Uri?>? report, Func<IReadOnlyList<SshEndpoint>, HostKeyPolicy, Task<T>> connect, CancellationToken cancellation)
     {
         LocaltonetAccount account = AppServices.Localtonet;
+        bool approvedInBrowser = false;
 
         void NeedsApproval(Uri url)
         {
             if (report is null) throw new UnauthorizedAccessException(L.T("The access key for this device is not valid."));
+            approvedInBrowser = true;
             report(L.T("Approve this connection in the browser. To skip approval each time, add an access key to the device."), url);
             _ = Dispatcher.UIThread.InvokeAsync(() => AppServices.OpenUrlAsync(this, url));
         }
@@ -1681,15 +1683,41 @@ public sealed partial class WorkspaceView : UserControl
 
         report?.Invoke(L.T("Connecting to device {0}...", device.Name), null);
         LocaltonetLink link = await LocaltonetLink.OpenAsync(session, cancellation);
+        T connected;
         try
         {
-            return await connect([link.Endpoint], link.IsDeviceKey);
+            connected = await connect([link.Endpoint], link.IsDeviceKey);
         }
         catch
         {
             await link.DisposeAsync();
             throw;
         }
+
+        // The owner just went through the approval, with their second factor. Without a key they would again at the
+        // next connection, and a device that came after the keys were fetched never gets one by itself.
+        if (approvedInBrowser) Dispatcher.UIThread.Post(() => SuggestAccessKey(device));
+        return connected;
+    }
+
+    // Devices already told about during this run, so that connecting again does not bring the line back.
+    private static readonly HashSet<Guid> KeySuggested = [];
+
+    /// <summary>
+    /// Says, in the line above the terminals, that the device has no access key and offers to get one. The keys are got
+    /// for the whole account in one approval, which is the only way Localtonet hands them out. Once per device and run.
+    /// </summary>
+    private void SuggestAccessKey(HostEntry device)
+    {
+        if (!AppServices.Vault.IsAvailable || !KeySuggested.Add(device.Id)) return;
+
+        LocaltonetLogin? owner = AppServices.Localtonet.Accounts.FirstOrDefault(a => a.Id == (device.LocaltonetAccountId ?? string.Empty));
+        if (owner is null || AppServices.Localtonet.KeyOf(owner) is null) return;
+
+        ShowNotice(
+            L.T("{0} has no access key, so every connection to it has to be approved in the browser.", device.Name),
+            L.T("Get access keys"),
+            () => _ = AppServices.Localtonet.ImportKeysAsync(_dialogs, url => AppServices.OpenUrlAsync(this, url), owner));
     }
 
     /// <summary>The servers to log in to, jump hosts first and the server itself last.</summary>

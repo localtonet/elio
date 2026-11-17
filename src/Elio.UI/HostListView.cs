@@ -105,6 +105,9 @@ public sealed class HostListView : UserControl
     private readonly TextBox _filter;
     private readonly HashSet<Guid> _selected = [];
 
+    // The shells of this computer, listed only while there is nothing else to open. Null where there are none.
+    private readonly DockPanel? _localShells;
+
     /// <summary>The account's devices, under the saved servers.</summary>
     public LocaltonetPanel Localtonet { get; }
 
@@ -185,7 +188,12 @@ public sealed class HostListView : UserControl
         layout.Children.Add(Docked(Footer(), Dock.Bottom));
         layout.Children.Add(Docked(snippets, Dock.Bottom));
         layout.Children.Add(Docked(Localtonet, Dock.Bottom));
-        if (AppServices.LocalShells.Count > 0) layout.Children.Add(Docked(LocalShellList(), Dock.Bottom));
+        if (AppServices.LocalShells.Count > 0)
+        {
+            _localShells = LocalShellList();
+            layout.Children.Add(Docked(_localShells, Dock.Bottom));
+        }
+
         layout.Children.Add(new ScrollViewer { Content = _rows });
 
         // The hairline is on the side the workspace is on, whichever way the language reads.
@@ -308,6 +316,17 @@ public sealed class HostListView : UserControl
                 FontWeight = FontWeight.Bold,
                 Foreground = ElioColors.Text,
                 VerticalAlignment = VerticalAlignment.Center,
+            },
+
+            // Which version this is, where it is always in sight.
+            new TextBlock
+            {
+                Text = UpdateCheck.RunningText,
+                FontSize = ElioStyle.SmallFontSize,
+                Foreground = ElioColors.TextFaint,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 2, 0, 0),
+                Tag = "version",
             },
         },
     };
@@ -516,12 +535,23 @@ public sealed class HostListView : UserControl
     {
         Rebuild();
         RebuildSnippets();
+        ShowLocalShells();
+    }
+
+    /// <summary>
+    /// The shells of this computer take room that the servers need, and the button at the top of the list opens them
+    /// (a right click offers the others). So they are only listed here while there is no server or device to show instead.
+    /// </summary>
+    private void ShowLocalShells()
+    {
+        if (_localShells is not null) _localShells.IsVisible = _library.Hosts.Count == 0 && AppServices.Localtonet.Devices.Count == 0;
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         AppServices.LibraryChanged += ShowLibrary;
+        AppServices.Localtonet.Changed += ShowLocalShells;
         ShowLibrary();
     }
 
@@ -529,6 +559,7 @@ public sealed class HostListView : UserControl
     {
         base.OnDetachedFromVisualTree(e);
         AppServices.LibraryChanged -= ShowLibrary;
+        AppServices.Localtonet.Changed -= ShowLocalShells;
     }
 
     private static bool Matches(HostEntry host, string filter) =>

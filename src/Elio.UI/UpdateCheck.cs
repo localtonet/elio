@@ -10,7 +10,7 @@ namespace Elio.UI;
 public sealed record ReleaseInfo(string Version, string? Tag, Uri Page);
 
 /// <summary>
-/// Asks GitHub, at most once a day, whether a newer version of Elio has been released, and says so if there is one. It is
+/// Asks GitHub, at most once every six hours, whether a newer version of Elio has been released, and says so if there is one. It is
 /// the only request Elio makes that the user did not ask for, it sends nothing but the question, and it can be turned
 /// off in the settings. Whatever goes wrong, it stays quiet. Installing the new version is another matter: that happens
 /// only when the user presses the button for it (<see cref="UpdateInstaller"/>).
@@ -22,7 +22,14 @@ public static class UpdateCheck
     private const int LargestAnswer = 1024 * 1024;
 
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan Pause = TimeSpan.FromDays(1);
+
+    // Long enough to cost GitHub nothing, short enough that a release reaches a copy that keeps running within a working
+    // day. A day was too long: a copy that had just asked, and was restarted soon after a release, heard of it a day later.
+    private static readonly TimeSpan Pause = TimeSpan.FromHours(6);
+
+    // The wait is cut into pieces and the clock looked at again after each one. A computer that was asleep does not count
+    // the time it slept in a single long wait, which put the next question off by as long as the computer had slept.
+    private static readonly TimeSpan Piece = TimeSpan.FromMinutes(20);
 
     private static int _started;
 
@@ -32,10 +39,16 @@ public static class UpdateCheck
     /// <summary>The version that is running.</summary>
     public static Version? Running => typeof(UpdateCheck).Assembly.GetName().Version;
 
+    /// <summary>The running version as it is shown to people: three numbers, such as "0.1.5".</summary>
+    public static string RunningText => Show(Running);
+
+    /// <summary>A version as it is written on a release: its first three numbers. Nothing for no version.</summary>
+    internal static string Show(Version? version) => version is null ? string.Empty : $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+
     /// <summary>
-    /// Starts the checks, the first time it is called, and shows what they find in the given window: one now, and one a
-    /// day later for as long as Elio keeps running, since a copy that sits in the tray can run for weeks. Call it from
-    /// the thread the window lives on.
+    /// Starts the checks, the first time it is called, and shows what they find in the given window: one now, and one
+    /// every few hours for as long as Elio keeps running, since a copy that sits in the tray can run for weeks. Call it
+    /// from the thread the window lives on.
     /// </summary>
     public static void Start(WorkspaceView workspace)
     {
@@ -49,10 +62,12 @@ public static class UpdateCheck
     {
         while (true)
         {
-            // A time in the future is a clock that was set back since, and does not put the check off.
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-            TimeSpan wait = AppServices.Settings.LastUpdateCheck is DateTimeOffset last && now >= last && now - last < Pause ? Pause - (now - last) : TimeSpan.Zero;
-            if (wait > TimeSpan.Zero) await Task.Delay(wait);
+            TimeSpan wait = DueIn(AppServices.Settings.LastUpdateCheck, DateTimeOffset.UtcNow);
+            if (wait > TimeSpan.Zero)
+            {
+                await Task.Delay(wait < Piece ? wait : Piece);
+                continue;
+            }
 
             // The setting may have been turned off since the last round.
             if (!AppServices.Settings.CheckForUpdates) return;
@@ -65,6 +80,11 @@ public static class UpdateCheck
             }
         }
     }
+
+    /// <summary>How long until the next check is due, given when the last one was made. Zero when it is due now.</summary>
+    /// <remarks>A last check in the future is a clock that was set back since, and does not put the next one off.</remarks>
+    internal static TimeSpan DueIn(DateTimeOffset? last, DateTimeOffset now) =>
+        last is DateTimeOffset before && now >= before && now - before < Pause ? Pause - (now - before) : TimeSpan.Zero;
 
     /// <summary>
     /// Asks now, whatever was asked before, and says what came of it in the window: that there is a newer version, that
