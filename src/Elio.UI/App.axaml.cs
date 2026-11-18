@@ -29,8 +29,16 @@ public partial class App : Application
     {
         if (PlatformSettings is { } platform) platform.ColorValuesChanged += (_, _) => AppServices.SystemAppearanceChanged();
 
-        // The terminal engine leaves reading PNG files to the app, which has Skia for it.
-        Elio.Terminal.TerminalImages.DecodePng = DecodePng;
+        // The terminal engine leaves reading PNG files to the app, which has Skia for it. Without the engine, which is
+        // a file next to the program, no terminal can open, and each one says so when it is tried. That is no reason
+        // for the app itself not to start, so a missing engine is let by here.
+        try
+        {
+            Elio.Terminal.TerminalImages.DecodePng = DecodePng;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+        }
 
         // A vault behind Windows Hello is opened once, before any window needs a password from it. Saying no
         // leaves it shut for this run, and servers ask for their passwords instead.

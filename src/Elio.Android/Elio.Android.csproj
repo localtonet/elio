@@ -4,7 +4,7 @@
     <TargetFramework>net10.0-android</TargetFramework>
     <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
     <ApplicationId>sh.elio.app</ApplicationId>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationVersion>3</ApplicationVersion>
     <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <!-- The terminal engine is built for these three only; a package for any other would start and then fail. -->
@@ -26,4 +26,12 @@
     <AndroidNativeLibrary Include="$(NativeOut)android-arm\lib\libghostty-vt.so" Abi="armeabi-v7a" Condition="Exists('$(NativeOut)android-arm\lib\libghostty-vt.so')" />
     <AndroidNativeLibrary Include="$(NativeOut)android-x64\lib\libghostty-vt.so" Abi="x86_64" Condition="Exists('$(NativeOut)android-x64\lib\libghostty-vt.so')" />
   </ItemGroup>
+  <!--
+    The lines above leave a library out when it is missing, and a package without the engine starts and then fails on
+    its first terminal. A release build stops here instead of making one.
+  -->
+  <Target Name="RequireTerminalEngine" BeforeTargets="PrepareForBuild" Condition="'$(Configuration)' == 'Release'">
+    <Error Condition="!Exists('$(NativeOut)android-arm64\lib\libghostty-vt.so') Or !Exists('$(NativeOut)android-arm\lib\libghostty-vt.so') Or !Exists('$(NativeOut)android-x64\lib\libghostty-vt.so')"
+           Text="libghostty-vt.so is missing for at least one of android-arm64, android-arm and android-x64 in $(NativeOut). Build it with build/native.sh. A package without it dies when it starts." />
+  </Target>
 </Project>

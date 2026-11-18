@@ -5,5 +5,7 @@
   <uses-permission android:name="android.permission.CAMERA" />
   <uses-feature android:name="android.hardware.camera" android:required="false" />
   <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+  <!-- The screen that reads the QR code is held upright. Google Play takes that for a need of screens that can be, and would leave out the tablets and desktops that cannot. -->
+  <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
   <application android:allowBackup="false" android:label="Elio" android:icon="@mipmap/icon" />
 </manifest>
