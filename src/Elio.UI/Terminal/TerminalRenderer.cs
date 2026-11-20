@@ -7,6 +7,16 @@ using System.Text.RegularExpressions;
 namespace Elio.UI.Terminal;
 
 /// <summary>
+/// The command line being typed, as far as the renderer is to color it: where it starts on the screen and how to color text.
+/// </summary>
+/// <param name="StartColumn">The column of the first character of the line, on the row it starts on.</param>
+/// <param name="StartRow">That row, counted on the screen.</param>
+/// <param name="Spans">Tells which parts of a line are what.</param>
+/// <param name="ColorOf">The color for a kind of text as 0xRRGGBB, or null to leave it as it is.</param>
+/// <param name="Version">Changes when the colors or the way of telling things apart did, so that a line painted before is painted again.</param>
+internal sealed record InputHighlight(int StartColumn, int StartRow, Func<string, IReadOnlyList<HighlightSpan>> Spans, Func<HighlightKind, uint?> ColorOf, int Version);
+
+/// <summary>
 /// Draws a terminal. Each row keeps what it needs to draw itself, and only rows the engine reports
 /// as changed are rebuilt. Used only on the render thread.
 /// </summary>
@@ -37,7 +47,16 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
     // What the shell would be given if the suggestion were taken, drawn faint enough not to pass for what was typed.
     private const uint GhostAlpha = 0x80000000;
 
+    // The longest command line that is colored, in characters and in rows. Beyond that it is not a line anyone is typing.
+    private const int MaxInputChars = 4096;
+    private const int MaxInputRows = 12;
+
     private readonly List<RowLayer> _rows = [];
+
+    // What each row held when it was last read, to paint the line being typed from, and to put it back when it is not wanted.
+    private readonly List<TerminalCell[]> _cells = [];
+    private readonly HashSet<int> _paintedRows = [];
+    private string? _paintedKey;
     private readonly SKPaint _paint = new() { IsAntialias = false, Style = SKPaintStyle.Fill };
     private readonly SKTextBlobBuilder _builder = new();
     private ushort[] _glyphs = new ushort[256];
@@ -66,7 +85,8 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
 
     /// <returns>The frame that was drawn, or null if the session has closed.</returns>
     /// <param name="ghost">A suggestion for the rest of the line being typed, drawn from the cursor on. Null for none.</param>
-    public TerminalFrame? Draw(SKCanvas canvas, TerminalSession session, float width, float height, bool focused, bool cursorOn, string? ghost)
+    /// <param name="input">The command line being typed, to be colored by what its parts are. Null for none.</param>
+    public TerminalFrame? Draw(SKCanvas canvas, TerminalSession session, float width, float height, bool focused, bool cursorOn, string? ghost, InputHighlight? input = null)
     {
         long now = Environment.TickCount64;
         NextAnimation = session.AdvanceAnimations(now) is long due ? TimeSpan.FromMilliseconds(Math.Clamp(due - now, MinAnimationDelay, MaxAnimationDelay)) : null;
@@ -74,6 +94,7 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
         TerminalFrame? read = session.ReadFrame(BuildRow, _everRead ? FrameRead.Changes : FrameRead.All);
         if (read is not TerminalFrame frame) return null;
         _everRead = true;
+        PaintInput(frame, input);
 
         canvas.Save();
         canvas.ClipRect(new SKRect(0, 0, width, height));
@@ -307,13 +328,127 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
     private void BuildRow(int y, ReadOnlySpan<TerminalCell> cells)
     {
         while (_rows.Count <= y) _rows.Add(new RowLayer());
+        while (_cells.Count <= y) _cells.Add([]);
 
-        RowLayer row = _rows[y];
+        if (_cells[y].Length != cells.Length) _cells[y] = new TerminalCell[cells.Length];
+        cells.CopyTo(_cells[y]);
+
+        // The row is made again as the engine has it, which is not how a line being typed was painted.
+        if (_paintedRows.Remove(y)) _paintedKey = null;
+
+        LayOut(_rows[y], cells);
+    }
+
+    private void LayOut(RowLayer row, ReadOnlySpan<TerminalCell> cells)
+    {
         row.Clear();
         BuildBackgrounds(row, cells);
         if (highlights.Count > 0) BuildHighlights(row, cells);
         BuildText(row, cells);
         BuildLines(row, cells);
+    }
+
+    /// <summary>
+    /// Colors the command line being typed by what its parts are. The rows it is on are laid out again from a copy of
+    /// their cells with the colors changed, and only when the line, or how to color it, is not what was painted last
+    /// time. Text a program has colored itself, as the shell does with a suggestion, is left alone.
+    /// </summary>
+    private void PaintInput(TerminalFrame frame, InputHighlight? input)
+    {
+        if (input is null || !frame.CursorVisible || input.StartRow < 0 || input.StartRow > frame.CursorY || frame.CursorY >= _cells.Count)
+        {
+            Unpaint();
+            return;
+        }
+
+        // The line as text, with the cell each of its characters is in. A row that is full goes on in the next one.
+        var text = new StringBuilder();
+        var where = new List<(int Row, int Column)>();
+        int rows = Math.Min(frame.Rows, _cells.Count);
+        int column = input.StartColumn;
+
+        for (int row = input.StartRow; row < rows && row - input.StartRow < MaxInputRows && text.Length < MaxInputChars; row++, column = 0)
+        {
+            TerminalCell[] cells = _cells[row];
+            int last = -1;
+            for (int x = cells.Length - 1; x >= 0; x--)
+            {
+                if (cells[x].Codepoint is 0 or ' ') continue;
+                last = x;
+                break;
+            }
+
+            // What was typed and then left as spaces is part of the line up to the cursor.
+            int stop = row == frame.CursorY ? Math.Max(last, frame.CursorX - 1) : last;
+            bool previousWide = false;
+            for (int x = column; x <= stop && x < cells.Length; x++)
+            {
+                TerminalCell cell = cells[x];
+                if (cell.Codepoint == 0 && previousWide)
+                {
+                    previousWide = false;
+                    continue;
+                }
+
+                string piece = cell.Cluster ?? (cell.Codepoint == 0 ? " " : char.ConvertFromUtf32((int)Math.Min(cell.Codepoint, 0x10FFFF)));
+                for (int k = 0; k < piece.Length; k++) where.Add((row, x));
+                text.Append(piece);
+                previousWide = cell.Codepoint != 0 && IsWide((int)cell.Codepoint);
+            }
+
+            bool full = last == cells.Length - 1;
+            if (row >= frame.CursorY && !full) break;
+        }
+
+        if (text.Length == 0)
+        {
+            Unpaint();
+            return;
+        }
+
+        string line = text.ToString();
+        string key = $"{input.Version}|{input.StartRow}|{input.StartColumn}|{frame.Foreground:x}|{line}";
+        if (key == _paintedKey) return;
+
+        Unpaint();
+        _paintedKey = key;
+
+        Dictionary<int, TerminalCell[]>? changed = null;
+        foreach (HighlightSpan span in input.Spans(line))
+        {
+            if (input.ColorOf(span.Kind) is not uint color) continue;
+
+            for (int i = span.Start; i < span.Start + span.Length && i < where.Count; i++)
+            {
+                (int row, int x) = where[i];
+                if (_cells[row][x].Foreground != frame.Foreground || (_cells[row][x].Flags & CellFlags.Faint) != 0) continue;
+
+                changed ??= [];
+                if (!changed.TryGetValue(row, out TerminalCell[]? copy)) changed[row] = copy = (TerminalCell[])_cells[row].Clone();
+                copy[x].Foreground = color;
+            }
+        }
+
+        if (changed is null) return;
+
+        foreach ((int row, TerminalCell[] cells) in changed)
+        {
+            LayOut(_rows[row], cells);
+            _paintedRows.Add(row);
+        }
+    }
+
+    // Puts back the rows that were painted, as the engine gave them.
+    private void Unpaint()
+    {
+        if (_paintedRows.Count > 0)
+        {
+            foreach (int row in _paintedRows)
+                if (row < _rows.Count && row < _cells.Count) LayOut(_rows[row], _cells[row]);
+            _paintedRows.Clear();
+        }
+
+        _paintedKey = null;
     }
 
     private void BuildHighlights(RowLayer row, ReadOnlySpan<TerminalCell> cells)

@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
+using Avalonia.Media.Fonts;
 
 namespace Elio.UI;
 
@@ -19,6 +21,9 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+
+        // A phone has no monospaced font that can be asked for by name, and code in the editor needs one. See ElioStyle.CodeFont.
+        FontManager.Current.AddFontCollection(new EmbeddedFontCollection(new Uri("fonts:ElioMono"), new Uri("avares://Elio.UI/Fonts")));
 
         // The built-in controls follow the same choice as the app's own colors.
         RequestedThemeVariant = AppServices.Settings.LightInterface ? Avalonia.Styling.ThemeVariant.Light : Avalonia.Styling.ThemeVariant.Dark;

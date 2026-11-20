@@ -26,6 +26,10 @@ public sealed partial class TerminalSession
     private nint _outputStart;
     private nint _lastOutputStart;
     private nint _lastOutputEnd;
+
+    // Where what is typed at a prompt begins. Follows its text as the screen scrolls.
+    private nint _inputStart;
+    private bool _inputActive;
     private bool _outputOpen;
     private bool _hasLastOutput;
     private long _outputStartedAt;
@@ -113,12 +117,19 @@ public sealed partial class TerminalSession
             {
                 case Ghostty.SemanticPromptStart when mark.PromptKind == Ghostty.SemanticPromptPrimary:
                     _promptMarksSeen = true;
+                    _inputActive = false;
 
                     // Some shells never say a command ended. The next prompt says it for them.
                     if (_outputOpen) FinishCommand(null);
                     break;
 
+                case Ghostty.SemanticInputStart:
+                    // The shell has drawn its prompt and the next thing on the line is what the user types.
+                    _inputActive = TrackCursor(ref _inputStart);
+                    break;
+
                 case Ghostty.SemanticOutputStart:
+                    _inputActive = false;
                     if (!TrackCursor(ref _outputStart)) break;
                     _outputOpen = true;
                     _outputStartedAt = Stopwatch.GetTimestamp();
@@ -146,6 +157,42 @@ public sealed partial class TerminalSession
         _hasLastOutput = TrackCursor(ref _lastOutputEnd);
         _finishedPending.Add(new CommandFinished(exitCode, Stopwatch.GetElapsedTime(_outputStartedAt), _runningCommand));
         _runningCommand = null;
+    }
+
+    /// <summary>
+    /// The cell where what is typed at the prompt begins, in the rows the screen shows now, or null when there is no prompt
+    /// to type at or it has scrolled out of sight. A shell that marks its prompts says where; for the others see
+    /// <see cref="MarkInputStart"/>.
+    /// </summary>
+    public unsafe (int Column, int Row)? InputStartCell()
+    {
+        lock (_terminalGate)
+        {
+            if (_disposed != 0 || !_inputActive || _inputStart == 0) return null;
+
+            Ghostty.PointCoordinate point = default;
+            if (Ghostty.TrackedGridRefPoint(_inputStart, Ghostty.PointTagViewport, &point) != Ghostty.Success || point.Y > short.MaxValue) return null;
+            return (point.X, (int)point.Y);
+        }
+    }
+
+    /// <summary>
+    /// Says that what is typed from the cursor on is a command line. For shells that do not mark their prompts, where it
+    /// is called just before the first character of a line goes out.
+    /// </summary>
+    public unsafe void MarkInputStart()
+    {
+        lock (_terminalGate)
+        {
+            if (_disposed != 0 || AlternateScreen) return;
+            _inputActive = TrackCursor(ref _inputStart);
+        }
+    }
+
+    /// <summary>Says that there is no line being typed: Enter was pressed, or a program took the screen.</summary>
+    public void ClearInputStart()
+    {
+        lock (_terminalGate) _inputActive = false;
     }
 
     /// <summary>Makes a mark follow the cell the cursor is on now.</summary>

@@ -3,7 +3,8 @@
 # Push a tag such as v1.2.3 to release. A tag with a hyphen (v1.2.3-beta.1) is published as a pre-release.
 # Running the workflow by hand builds everything and keeps the files as workflow artifacts, without a release.
 #
-# After a release, build/package-managers.sh feeds winget, Homebrew and Scoop: see the "packages" job at the end.
+# After a release, build/package-managers.sh feeds Homebrew and Scoop: see the "packages" job at the end. Submitting to
+# winget is switched off for now (the commented-out "winget" job).
 #
 # The Android package is signed with the release key when these repository secrets exist, and with a
 # throwaway debug key otherwise (such a package installs, but cannot be updated by a later build):
@@ -294,12 +295,13 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Elio ${GITHUB_REF_NAME#v}" --generate-notes "${flags[@]}"
 
-  # Puts the release into the package managers: a Homebrew tap (localtonet/homebrew-tap), a Scoop bucket
-  # (localtonet/scoop-bucket) and winget (a pull request to microsoft/winget-pkgs). Each is skipped with a warning
-  # while its secret is missing, and a pre-release is never offered. The manifests are made by
-  # build/package-managers.sh from the files the release has just published.
+  # Puts the release into the package managers: a Homebrew tap (localtonet/homebrew-tap) and a Scoop bucket
+  # (localtonet/scoop-bucket). Each is skipped with a warning while its secret is missing, and a pre-release is
+  # never offered. The manifests are made by build/package-managers.sh from the files the release has just published,
+  # the winget ones included, so that they are there to submit by hand or when the "winget" job below is turned on.
   #   PACKAGES_TOKEN: a personal access token that can write to the two repositories above
-  #   WINGET_TOKEN: a classic personal access token with public_repo, from an account that has forked winget-pkgs
+  # (winget, a pull request to microsoft/winget-pkgs, is switched off for now: see the commented-out job at the end.
+  #  It would need WINGET_TOKEN, a classic personal access token with public_repo from an account that forked winget-pkgs.)
   packages:
     needs: release
     if: ${{ !cancelled() && needs.release.result == 'success' && !contains(github.ref_name, '-') }}
@@ -350,28 +352,31 @@ jobs:
           push localtonet/homebrew-tap manifests/homebrew homebrew-tap
           push localtonet/scoop-bucket manifests/scoop scoop-bucket
 
-  winget:
-    needs: packages
-    if: ${{ !cancelled() && needs.packages.result == 'success' }}
-    runs-on: windows-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: package-manifests
-          path: manifests
-
-      - name: Submit to winget-pkgs
-        shell: pwsh
-        env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-        run: |
-          if (-not $env:WINGET_TOKEN) {
-            Write-Host "::warning::No WINGET_TOKEN is configured, so winget was not updated."
-            exit 0
-          }
-          if (-not (Test-Path manifests/winget)) {
-            Write-Host "::warning::This release has no Windows build, so winget was not updated."
-            exit 0
-          }
-          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
-          ./wingetcreate.exe submit --token $env:WINGET_TOKEN manifests/winget
+  # Switched off for now: winget-pkgs cannot be submitted to yet. To turn it on again, remove the "# " that starts
+  # each line of this job, and the "switched off" notes at the top and above the "packages" job.
+  #
+  # winget:
+  #   needs: packages
+  #   if: ${{ !cancelled() && needs.packages.result == 'success' }}
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: package-manifests
+  #         path: manifests
+  #
+  #     - name: Submit to winget-pkgs
+  #       shell: pwsh
+  #       env:
+  #         WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+  #       run: |
+  #         if (-not $env:WINGET_TOKEN) {
+  #           Write-Host "::warning::No WINGET_TOKEN is configured, so winget was not updated."
+  #           exit 0
+  #         }
+  #         if (-not (Test-Path manifests/winget)) {
+  #           Write-Host "::warning::This release has no Windows build, so winget was not updated."
+  #           exit 0
+  #         }
+  #         Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+  #         ./wingetcreate.exe submit --token $env:WINGET_TOKEN manifests/winget

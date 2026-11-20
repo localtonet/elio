@@ -69,6 +69,10 @@ public sealed class TerminalView : Control
     // Followed whether or not suggestions are on, so that turning them on does not have to wait for the next Enter.
     private readonly TypedLine _typed = new();
     private bool _suggestions;
+    private bool _syntaxColors = true;
+    private bool _unknownInRed;
+    private int _syntaxVersion;
+    private CommandIndex? _commands;
 
     // Written on the render thread, read on the UI thread.
     private volatile bool _cursorBlinks;
@@ -144,6 +148,96 @@ public sealed class TerminalView : Control
             _suggestions = value;
             InvalidateVisual();
         }
+    }
+
+    /// <summary>
+    /// Whether the command being typed at a prompt is colored by what its parts are, as zsh-syntax-highlighting does it. It
+    /// only paints over text the shell left in the default color, so a shell that colors the line itself is not painted over.
+    /// </summary>
+    public bool SyntaxColors
+    {
+        get => _syntaxColors;
+        set
+        {
+            if (_syntaxColors == value) return;
+            _syntaxColors = value;
+            _syntaxVersion++;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>Whether a command that is not on the path is shown in red. Aliases and functions are not on the path either.</summary>
+    public bool UnknownInRed
+    {
+        get => _unknownInRed;
+        set
+        {
+            if (_unknownInRed == value) return;
+            _unknownInRed = value;
+            _syntaxVersion++;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>The commands that exist where this terminal's shell runs, to tell a command from something mistyped. Null when not known.</summary>
+    public CommandIndex? Commands
+    {
+        get => _commands;
+        set
+        {
+            _commands = value;
+            _syntaxVersion++;
+            InvalidateVisual();
+        }
+    }
+
+    // The colors are the theme's own, so that the line looks as if the shell had colored it for this theme.
+    private uint? ColorFor(HighlightKind kind)
+    {
+        uint[] ansi = _appearance.Theme.Ansi;
+        if (ansi.Length < 16) return null;
+
+        uint color = kind switch
+        {
+            HighlightKind.Command or HighlightKind.Builtin => ansi[2],
+            HighlightKind.UnknownCommand or HighlightKind.Error => ansi[1],
+            HighlightKind.Keyword or HighlightKind.Operator or HighlightKind.Redirect => ansi[5],
+            HighlightKind.Option => ansi[6],
+            HighlightKind.String => ansi[3],
+            HighlightKind.Variable or HighlightKind.Assignment => ansi[4],
+            HighlightKind.Comment => ansi[8],
+            _ => 0,
+        };
+
+        // A color that cannot be told from the background would hide the text.
+        return color == 0 || color == _appearance.Theme.Background ? null : color;
+    }
+
+    private CommandState Lookup(string word)
+    {
+        CommandState state = _commands?.Check(word) ?? CommandState.Unknown;
+        return state == CommandState.Missing && !_unknownInRed ? CommandState.Unknown : state;
+    }
+
+    private IReadOnlyList<HighlightSpan> SpansOf(string line) => ShellHighlighter.Highlight(line, Lookup);
+
+    // Where the line being typed starts, if there is one to color. A program that is running is not given colors.
+    private InputHighlight? CurrentInput()
+    {
+        if (!_syntaxColors || HistoryPaused || _session is not TerminalSession session || session.AlternateScreen) return null;
+        if (session.PromptMarksSeen && !session.CursorAtPrompt) return null;
+        if (session.InputStartCell() is not (int column, int row)) return null;
+
+        return new InputHighlight(column, row, SpansOf, ColorFor, _syntaxVersion);
+    }
+
+    // For a shell that does not mark its prompts: the first character of a line says where the line begins.
+    private void MarkLineStart(string text)
+    {
+        if (!_syntaxColors || _session is not TerminalSession session || session.PromptMarksSeen || session.AlternateScreen) return;
+        if (text.Length == 0 || text.Any(char.IsControl) || _typed is not { Known: true, Text.Length: 0 }) return;
+
+        session.MarkInputStart();
     }
 
     /// <summary>Where this terminal's commands are entered, such as a host's id. Suggestions from the same place come first.</summary>
@@ -319,9 +413,13 @@ public sealed class TerminalView : Control
         if (text is "\u0003" or "\u0015")
         {
             _typed.Reset();
+
+            // Ctrl+C gives a new prompt, and the line it left is no longer one being typed. Ctrl+U clears the line in place.
+            if (text == "\u0003") _session?.ClearInputStart();
         }
         else
         {
+            MarkLineStart(line);
             _typed.Type(line);
             if (line.Length != text.Length) EnterPressed();
         }
@@ -332,8 +430,15 @@ public sealed class TerminalView : Control
     /// <summary>Follows pasted text. A new line in it is not Enter: the shell may be holding the whole paste for editing.</summary>
     private void TrackPaste(string text)
     {
-        if (_session?.AlternateScreen != false) _typed.Invalidate();
-        else _typed.Type(text);
+        if (_session?.AlternateScreen != false)
+        {
+            _typed.Invalidate();
+        }
+        else
+        {
+            MarkLineStart(text);
+            _typed.Type(text);
+        }
 
         if (_suggestions) InvalidateVisual();
     }
@@ -359,6 +464,7 @@ public sealed class TerminalView : Control
             // Ctrl+C and Ctrl+U leave a shell with an empty line, which is as good as known.
             case TerminalKey.C or TerminalKey.U when mods == TerminalMods.Control:
                 _typed.Reset();
+                if (key == TerminalKey.C) _session?.ClearInputStart();
                 break;
             default:
                 _typed.Invalidate();
@@ -371,7 +477,14 @@ public sealed class TerminalView : Control
     /// <summary>Called before Enter is sent, while the line is still on the cursor's row.</summary>
     private void EnterPressed()
     {
+        _session?.ClearInputStart();
         string? line = _typed.Enter();
+        if (line is not null && _commands is CommandIndex commands && line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries) is [{ Length: > 0 } first, ..] && first.All(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' or '+'))
+        {
+            // What was run is a command that exists, whether or not it is on the path: an alias, say.
+            commands.Add(first);
+        }
+
         if (line is null || !_suggestions || HistoryPaused || History is not CommandHistory history || _session is not TerminalSession session) return;
 
         // With a shell that marks its prompts, a line typed anywhere else is an answer to some program.
@@ -565,7 +678,7 @@ public sealed class TerminalView : Control
     }
 
     public override void Render(DrawingContext context) =>
-        context.Custom(new DrawOperation(this, new Rect(Bounds.Size), IsFocused, _cursorOn, IsFocused ? SuggestedRest() : NoSuggestion()));
+        context.Custom(new DrawOperation(this, new Rect(Bounds.Size), IsFocused, _cursorOn, IsFocused ? SuggestedRest() : NoSuggestion(), CurrentInput()));
 
     /// <summary>
     /// Tells the on-screen keyboard that this is somewhere to type. A terminal has no text of its own to
@@ -605,7 +718,7 @@ public sealed class TerminalView : Control
         }, wait));
     }
 
-    private sealed class DrawOperation(TerminalView owner, Rect bounds, bool focused, bool cursorOn, string? ghost) : ICustomDrawOperation
+    private sealed class DrawOperation(TerminalView owner, Rect bounds, bool focused, bool cursorOn, string? ghost, InputHighlight? input) : ICustomDrawOperation
     {
         public Rect Bounds => bounds;
 
@@ -623,7 +736,7 @@ public sealed class TerminalView : Control
             if (context.TryGetFeature<ISkiaSharpApiLeaseFeature>() is not ISkiaSharpApiLeaseFeature feature) return;
 
             using ISkiaSharpApiLease lease = feature.Lease();
-            if (renderer.Draw(lease.SkCanvas, session, (float)bounds.Width, (float)bounds.Height, focused, cursorOn, ghost) is not TerminalFrame frame) return;
+            if (renderer.Draw(lease.SkCanvas, session, (float)bounds.Width, (float)bounds.Height, focused, cursorOn, ghost, input) is not TerminalFrame frame) return;
 
             owner._cursorBlinks = frame.CursorBlinking;
             if (renderer.NextAnimation is TimeSpan wait) owner.ScheduleAnimationFrame(wait);

@@ -11,6 +11,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Elio.Connections;
 using Elio.Core;
 
 namespace Elio.UI.Files;
@@ -30,6 +31,9 @@ public sealed class FilePanel : UserControl
     private const double FullWidth = 560;
     private const double MediumWidth = 300;
 
+    // Below this the path box has too little room between the buttons, as on a phone held upright, and goes on a line of its own.
+    private const double ToolsWidth = 340;
+
     private static readonly StreamGeometry FolderIcon = StreamGeometry.Parse("M1 3h5l1.5 2H15v9H1z");
     private static readonly StreamGeometry FileIcon = StreamGeometry.Parse("M3 1h7l3 3v11H3z");
 
@@ -43,7 +47,16 @@ public sealed class FilePanel : UserControl
     private readonly SubfolderSearch _deep;
     private readonly Button _hiddenButton;
     private readonly TypeAhead _typeAhead = new();
+    private readonly Button _foldersButton;
+    private CancellationTokenSource? _operation;
+    private CancellationTokenSource? _contentSearch;
+    private List<FileRow>? _contentRows;
+    private string _contentQuery = string.Empty;
+    private bool _contentMode;
     private string _columns = FullColumns;
+    private readonly Control _toolsLeft;
+    private readonly Control _toolsRight;
+    private bool _toolsNarrow;
 
     // Everything in the folder, and the part of it the list shows: what is left once hidden files and the search are through.
     private List<FileRow> _rows = [];
@@ -56,6 +69,9 @@ public sealed class FilePanel : UserControl
     private HashSet<string>? _restore;
     private CancellationTokenSource? _viewing;
     private CancellationTokenSource? _listing;
+
+    // The listing that is still being waited for, if any. A job that ends meanwhile must not start a listing of its own over it.
+    private CancellationTokenSource? _listingInFlight;
     private Comparison<FileRow> _sort = (a, b) => StringComparer.CurrentCultureIgnoreCase.Compare(a.Name, b.Name);
     private string _sortKey = "name";
     private bool _sortDescending;
@@ -67,6 +83,12 @@ public sealed class FilePanel : UserControl
     private static FilePanel? _dragOrigin;
 
     private readonly string? _transferLabel;
+
+    // What Copy and Cut put aside. Both sides share it, so that what was copied on one can be pasted on the other.
+    private static (FilePanel Origin, List<FileRow> Rows, bool Cut)? _clipboard;
+
+    // Content searches show at most this many files: more than a list is useful for, and little enough to answer fast.
+    private const int ContentLimit = 1000;
 
     /// <param name="title">The server's name, shown above the list when both sides are servers and need telling apart.</param>
     /// <param name="transferLabel">What copying to the other side is called here, when it is not a plain upload or download.</param>
@@ -103,6 +125,8 @@ public sealed class FilePanel : UserControl
         up.Click += (_, _) => GoUp();
         Button refresh = ToolButton(ElioStyle.IconRefresh, L.T("Refresh"), "panel-refresh");
         refresh.Click += (_, _) => _ = RefreshAsync();
+        _foldersButton = ToolButton(ElioStyle.IconPin, L.T("Folders you go to often"), "panel-folders");
+        _foldersButton.Click += (_, _) => ShowFrequentFolders();
         Button newFolder = ToolButton(ElioStyle.IconFolderPlus, L.T("New folder"), "panel-new-folder");
         newFolder.Click += (_, _) => _ = NewFolderAsync();
         Button find = ToolButton(ElioStyle.IconSearch, L.T("Search this folder ({0})", PrimaryKey + "+F"), "panel-find");
@@ -117,10 +141,14 @@ public sealed class FilePanel : UserControl
         _find.Closed += () => _ = CloseFindAsync();
         _find.Moved += MoveSelection;
 
-        var tools = new DockPanel { Margin = new Thickness(8, 8, 8, 4) };
-        tools.Children.Add(Docked(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 0, 6, 0), Children = { up, refresh } }, Dock.Left));
-        tools.Children.Add(Docked(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(4, 0, 0, 0), Children = { _hiddenButton, find, newFolder } }, Dock.Right));
+        // The buttons either side of the path, or under it when the panel is too narrow for all three in a row.
+        _toolsLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 0, 6, 0), Children = { up, refresh, _foldersButton } };
+        _toolsRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(4, 0, 0, 0), Children = { _hiddenButton, find, newFolder } };
+        var tools = new Grid { Margin = new Thickness(8, 8, 8, 4), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), RowDefinitions = new RowDefinitions("Auto,Auto") };
+        tools.Children.Add(_toolsLeft);
         tools.Children.Add(_path);
+        tools.Children.Add(_toolsRight);
+        ArrangeTools(narrow: false);
 
         _list = new ListBox
         {
@@ -247,7 +275,17 @@ public sealed class FilePanel : UserControl
     /// <summary>The user wants these copied to the other side.</summary>
     public event Action<IReadOnlyList<FileRow>>? TransferRequested;
 
+    /// <summary>The user wants to edit a file in another program on this computer.</summary>
     public event Action<FileRow>? EditRequested;
+
+    /// <summary>The user wants to look at a file without copying it.</summary>
+    public event Action<FileRow>? PreviewRequested;
+
+    /// <summary>The user wants to change a file in the editor of the app.</summary>
+    public event Action<FileRow>? EditorRequested;
+
+    /// <summary>What the list of folders gone to often is kept under: one name for this computer, one for each server.</summary>
+    public string FolderKey { get; set; } = "local";
 
     /// <summary>Rows from the other panel were dropped here.</summary>
     public event Action<IReadOnlyList<FileRow>>? RowsDropped;
@@ -287,8 +325,23 @@ public sealed class FilePanel : UserControl
     private FuncDataTemplate<FileRow> MakeTemplate() => new((row, _) => BuildRow(row), supportsRecycling: false);
 
     // The name always stays. The details give way when the panel is narrow, such as beside a terminal.
+    private void ArrangeTools(bool narrow)
+    {
+        _toolsNarrow = narrow;
+        Grid.SetRow(_path, 0);
+        Grid.SetColumn(_path, narrow ? 0 : 1);
+        Grid.SetColumnSpan(_path, narrow ? 3 : 1);
+        _path.Margin = narrow ? new Thickness(0, 0, 0, 4) : default;
+        Grid.SetRow(_toolsLeft, narrow ? 1 : 0);
+        Grid.SetColumn(_toolsLeft, 0);
+        Grid.SetRow(_toolsRight, narrow ? 1 : 0);
+        Grid.SetColumn(_toolsRight, 2);
+    }
+
     private void FitColumns(double width)
     {
+        if ((width < ToolsWidth) != _toolsNarrow) ArrangeTools(width < ToolsWidth);
+
         string columns = width >= FullWidth ? FullColumns : width >= MediumWidth ? MediumColumns : NarrowColumns;
         if (columns == _columns) return;
 
@@ -338,7 +391,7 @@ public sealed class FilePanel : UserControl
 
         string suffix = row.IsLink ? " ↗" : string.Empty;
         bool found = _applied.TryFind(row.Name, out int start, out int length);
-        if (!found && row.Where is not { Length: > 0 })
+        if (!found && row.Where is not { Length: > 0 } && !row.IsContentHit)
         {
             cell.Text = row.Name + suffix;
             return cell;
@@ -359,6 +412,9 @@ public sealed class FilePanel : UserControl
         if (row.Where is { Length: > 0 } where)
             runs.Add(new Run("  " + where) { Foreground = ElioColors.TextMuted, FontSize = ElioStyle.SmallFontSize });
 
+        if (row.IsContentHit)
+            runs.Add(new Run($"  :{row.Line}  {row.Snippet}") { Foreground = ElioColors.TextMuted, FontSize = ElioStyle.SmallFontSize });
+
         cell.Inlines = runs;
         return cell;
     }
@@ -372,25 +428,76 @@ public sealed class FilePanel : UserControl
             return item;
         }
 
-        var items = new List<MenuItem>
-        {
-            Item(_transferLabel ?? (Source.IsRemote ? L.T("Download") : L.T("Upload")), () => RequestTransfer(SelectedRows)),
-        };
-        if (Source.IsRemote) items.Add(Item(L.T("Edit"), () => { if (SelectedRows.FirstOrDefault(r => !r.IsDirectory) is FileRow row) EditRequested?.Invoke(row); }));
-        items.Add(Item(L.T("New folder"), () => _ = NewFolderAsync()));
-        items.Add(Item(L.T("Rename"), () => _ = RenameSelectedAsync()));
-        if (Source is RemoteFileSource) items.Add(Item(L.T("Permissions"), () => _ = ChangePermissionsAsync()));
-        items.Add(Item(L.T("Delete"), () => _ = DeleteSelectedAsync()));
-        items.Add(Item(L.T("Copy path"), () => _ = CopyPathAsync()));
+        MenuItem transfer = Item(_transferLabel ?? (Source.IsRemote ? L.T("Download") : L.T("Upload")), () => RequestTransfer(Chosen()));
+        MenuItem preview = Item(L.T("Preview"), RequestPreview);
+        MenuItem edit = Item(L.T("Edit"), RequestEdit);
+
+        // A phone has no other program to edit in.
+        MenuItem? external = Source.IsRemote && !AppServices.MobileLayout
+            ? Item(L.T("Edit in another program"), () => { if (SelectedRows.FirstOrDefault(r => !r.IsDirectory) is FileRow row) EditRequested?.Invoke(row); })
+            : null;
+
+        MenuItem newFile = Item(L.T("New file"), () => _ = NewFileAsync());
+        MenuItem newFolder = Item(L.T("New folder"), () => _ = NewFolderAsync());
+        MenuItem copy = Item(L.T("Copy"), CopySelected);
+        MenuItem cut = Item(L.T("Cut"), CutSelected);
+        MenuItem paste = Item(L.T("Paste"), () => _ = PasteAsync());
+        MenuItem duplicate = Item(L.T("Duplicate"), () => _ = DuplicateSelectedAsync());
+        MenuItem rename = Item(L.T("Rename"), () => _ = RenameSelectedAsync());
+        MenuItem? permissions = Source is RemoteFileSource ? Item(L.T("Permissions"), () => _ = ChangePermissionsAsync()) : null;
+        MenuItem delete = Item(L.T("Delete"), () => _ = DeleteSelectedAsync());
+        MenuItem extractHere = Item(L.T("Extract here"), () => _ = ExtractAsync(here: true));
+        MenuItem extractTo = Item(L.T("Extract to a new folder"), () => _ = ExtractAsync(here: false));
+        MenuItem compress = Item(L.T("Compress..."), () => _ = CompressAsync());
+        MenuItem copyPath = Item(L.T("Copy path"), () => _ = CopyPathAsync());
 
         // Only for a result found in a folder below, where it is a way to get to the file.
         MenuItem inFolder = Item(L.T("Show in its folder"), () => { if (SelectedRows.FirstOrDefault() is FileRow row) _ = GoToAsync(row); });
-        items.Add(inFolder);
-        items.Add(Item(L.T("Refresh"), () => _ = RefreshAsync()));
+        MenuItem refresh = Item(L.T("Refresh"), () => _ = RefreshAsync());
+
+        var items = new List<Control> { transfer, preview, edit };
+        if (external is not null) items.Add(external);
+        items.Add(new Separator());
+        items.AddRange([newFile, newFolder, copy, cut, paste, duplicate, rename]);
+        if (permissions is not null) items.Add(permissions);
+        items.Add(delete);
+        items.Add(new Separator());
+        items.AddRange([extractHere, extractTo, compress, new Separator(), copyPath, inFolder, refresh]);
 
         var menu = new ContextMenu { ItemsSource = items };
-        menu.Opening += (_, _) => inFolder.IsVisible = SelectedRows is [{ Where: not null }];
+        menu.Opening += (_, _) =>
+        {
+            IReadOnlyList<FileRow> rows = SelectedRows;
+            bool any = rows.Count > 0;
+            bool real = any && Chosen().Count > 0;
+            bool oneFile = rows.Count == 1 && !rows[0].IsDirectory;
+
+            transfer.IsEnabled = real;
+            preview.IsEnabled = any;
+            edit.IsEnabled = oneFile;
+            if (external is not null) external.IsEnabled = oneFile;
+            copy.IsEnabled = cut.IsEnabled = duplicate.IsEnabled = delete.IsEnabled = real;
+            rename.IsEnabled = real;
+            rename.Header = rows.Count > 1 ? L.T("Rename several...") : L.T("Rename");
+            if (permissions is not null) permissions.IsEnabled = real && rows.Count == 1;
+            paste.IsEnabled = CanPaste();
+            copyPath.IsEnabled = any;
+
+            bool archive = real && oneFile && Archives.Detect(rows[0].Name) != ArchiveKind.None && Source.CanRunCommands;
+            extractHere.IsVisible = extractTo.IsVisible = archive;
+            compress.IsVisible = Source.CanRunCommands;
+            compress.IsEnabled = real;
+            inFolder.IsVisible = rows is [{ Where: not null }] || rows is [{ IsContentHit: true }];
+        };
         return menu;
+    }
+
+    // What is chosen, unless some of it only shows where a search found something: such a row is not a file in this
+    // list, and there is nothing to rename, delete or copy by it.
+    private IReadOnlyList<FileRow> Chosen()
+    {
+        IReadOnlyList<FileRow> rows = SelectedRows;
+        return rows.Any(r => r.IsContentHit) ? [] : rows;
     }
 
     private async Task CopyPathAsync()
@@ -467,6 +574,7 @@ public sealed class FilePanel : UserControl
         _listing?.Cancel();
         var listing = new CancellationTokenSource();
         _listing = listing;
+        _listingInFlight = listing;
         HashSet<string> selected = keepSelection ? SelectedRows.Select(r => r.Path).ToHashSet() : [];
 
         try
@@ -481,8 +589,15 @@ public sealed class FilePanel : UserControl
             _rows = rows;
             _restore = selected;
 
-            if (!sameFolder) EndFind();
-            else if (searchSubfolders) RestartSubfolderSearch();
+            if (!sameFolder)
+            {
+                EndFind();
+                FrequentFolders.Shared.Visit(FolderKey, path);
+            }
+            else if (searchSubfolders)
+            {
+                RestartSubfolderSearch();
+            }
 
             await RebuildAsync();
         }
@@ -494,6 +609,10 @@ public sealed class FilePanel : UserControl
         {
             _path.Text = CurrentPath;
             ShowError($"{path}: {ex.Message}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_listingInFlight, listing)) _listingInFlight = null;
         }
     }
 
@@ -527,10 +646,12 @@ public sealed class FilePanel : UserControl
         _viewing = viewing;
 
         FileFilter filter = FilterNow();
-        bool inSubfolders = _find.IncludeSubfolders && !filter.IsEmpty;
+        bool inContents = _find.IsVisible && _find.SearchContents;
+        bool inSubfolders = !inContents && _find.IncludeSubfolders && !filter.IsEmpty;
 
         // What the search found below is added to on the window's thread, so what is read away from it is a copy.
-        List<FileRow> pool = _rows;
+        // A search through what files say shows what it found in place of the folder, once it has found it.
+        List<FileRow> pool = inContents && _contentRows is not null ? _contentRows : _rows;
         if (inSubfolders) pool = [.. _rows, .. _deep.Rows];
         bool showHidden = !_hideHidden;
         Comparison<FileRow> sort = _sort;
@@ -612,6 +733,7 @@ public sealed class FilePanel : UserControl
     private void Activate(FileRow row)
     {
         if (row.IsDirectory) _ = NavigateAsync(row.Path);
+        else if (row.IsContentHit) _ = GoToAsync(row);
         else RequestTransfer([row]);
     }
 
@@ -622,14 +744,38 @@ public sealed class FilePanel : UserControl
             case Key.Escape when _find.IsVisible:
                 _ = CloseFindAsync();
                 break;
+            case Key.Escape when _operation is not null:
+                _operation.Cancel();
+                break;
+            case Key.Space when !_typeAhead.IsTyping(DateTime.UtcNow) && SelectedRows.Count > 0:
+                RequestPreview();
+                break;
+            case Key.C when e.KeyModifiers == PrimaryModifier:
+                CopySelected();
+                break;
+            case Key.X when e.KeyModifiers == PrimaryModifier:
+                CutSelected();
+                break;
+            case Key.V when e.KeyModifiers == PrimaryModifier:
+                _ = PasteAsync();
+                break;
+            case Key.D when e.KeyModifiers == PrimaryModifier:
+                _ = DuplicateSelectedAsync();
+                break;
+            case Key.N when e.KeyModifiers == PrimaryModifier:
+                _ = NewFileAsync();
+                break;
             case Key.A when e.KeyModifiers == PrimaryModifier:
                 _list.SelectAll();
                 break;
             case Key.Enter when SelectedRows.Count == 1 && SelectedRows[0].IsDirectory:
                 _ = NavigateAsync(SelectedRows[0].Path);
                 break;
+            case Key.Enter when SelectedRows is [{ IsContentHit: true } hit]:
+                _ = GoToAsync(hit);
+                break;
             case Key.Enter:
-                RequestTransfer(SelectedRows);
+                RequestTransfer(Chosen());
                 break;
             case Key.Back:
                 GoUp();
@@ -640,8 +786,8 @@ public sealed class FilePanel : UserControl
             case Key.F2:
                 _ = RenameSelectedAsync();
                 break;
-            case Key.F4 when Source.IsRemote && SelectedRows.FirstOrDefault(r => !r.IsDirectory) is FileRow row:
-                EditRequested?.Invoke(row);
+            case Key.F4:
+                RequestEdit();
                 break;
             case Key.F7:
                 _ = NewFolderAsync();
@@ -720,7 +866,7 @@ public sealed class FilePanel : UserControl
     /// <summary>Opens the search bar over the list and puts the cursor in it.</summary>
     public void ShowFind() => _find.Open();
 
-    private FileFilter FilterNow() => _find.IsVisible ? FileFilter.Parse(_find.Text, _find.UseRegex) : FileFilter.None;
+    private FileFilter FilterNow() => _find.IsVisible && !_find.SearchContents ? FileFilter.Parse(_find.Text, _find.UseRegex) : FileFilter.None;
 
     private void OnFindChanged(bool typing)
     {
@@ -731,6 +877,20 @@ public sealed class FilePanel : UserControl
             AppServices.Settings.FileFilterWithRegex = _find.UseRegex;
             AppServices.SaveSettings();
         }
+
+        // Looking inside files takes a while, so it waits for Enter. Switching to or from it only changes what is shown.
+        if (_find.SearchContents != _contentMode)
+        {
+            _contentMode = _find.SearchContents;
+            _contentSearch?.Cancel();
+            _contentRows = null;
+            _deep.Stop();
+            _find.ShowCount(string.Empty, problem: false);
+            _ = RebuildAsync();
+            return;
+        }
+
+        if (_contentMode) return;
 
         // Turning the folders below off ends a walk that is still going. What it found is thrown away with it.
         if (!_find.IncludeSubfolders) _deep.Stop();
@@ -757,7 +917,7 @@ public sealed class FilePanel : UserControl
 
     private void ShowMatchCount(bool timedOut)
     {
-        if (!_find.IsVisible) return;
+        if (!_find.IsVisible || _find.SearchContents) return;
 
         if (_applied.IsInvalid) _find.ShowCount(L.T("Not a valid pattern"), problem: true);
         else if (timedOut) _find.ShowCount(L.T("Took too long"), problem: true);
@@ -771,6 +931,14 @@ public sealed class FilePanel : UserControl
     // from here, since pressing Enter after typing is not asking for that.
     private async Task AcceptFindAsync()
     {
+        if (_find.SearchContents)
+        {
+            // Enter again on what was searched goes to the file chosen; on something new it searches.
+            if (_contentRows is not null && _find.Text.Trim() == _contentQuery && SelectedRows.FirstOrDefault() is FileRow hit) await GoToAsync(hit);
+            else await SearchContentsAsync();
+            return;
+        }
+
         await RebuildAsync();
 
         FileRow? target = SelectedRows.FirstOrDefault() ?? _shown.FirstOrDefault();
@@ -807,10 +975,14 @@ public sealed class FilePanel : UserControl
     private void EndFind()
     {
         _deep.Stop();
+        _contentSearch?.Cancel();
+        _contentRows = null;
+        _contentMode = false;
         _quiet = true;
         try
         {
             _find.IncludeSubfolders = false;
+            _find.SearchContents = false;
             _find.Text = string.Empty;
             _find.ShowCount(string.Empty, problem: false);
             _find.IsVisible = false;
@@ -840,6 +1012,319 @@ public sealed class FilePanel : UserControl
 
     private void MarkHiddenButton() => _hiddenButton.Background = _hideHidden ? ElioColors.Selection : ElioColors.Transparent;
 
+    private void RequestPreview()
+    {
+        if (SelectedRows.FirstOrDefault() is FileRow row) PreviewRequested?.Invoke(row);
+    }
+
+    private void RequestEdit()
+    {
+        if (SelectedRows is [{ IsDirectory: false } row]) EditorRequested?.Invoke(row);
+    }
+
+    /// <summary>Moves the choice by one row and gives the row that is chosen then, so that a preview can follow the list.</summary>
+    public FileRow? Step(int delta)
+    {
+        if (_shown.Count == 0) return null;
+
+        MoveSelection(delta);
+        return SelectedRows.FirstOrDefault();
+    }
+
+    /// <summary>Chooses the rows with these names, and shows the first of them.</summary>
+    public void SelectNames(IEnumerable<string> names)
+    {
+        var wanted = names.ToHashSet(StringComparer.Ordinal);
+        if (wanted.Count == 0) return;
+
+        _list.SelectedItems?.Clear();
+        for (int i = 0; i < _shown.Count; i++)
+            if (wanted.Contains(_shown[i].Name)) _list.Selection.Select(i);
+
+        if (_list.SelectedIndex >= 0) _list.ScrollIntoView(_list.SelectedIndex);
+    }
+
+    // The folders that are gone to most, which is where one usually wants to go. Kept apart for each server.
+    private void ShowFrequentFolders()
+    {
+        const int Shown = 15;
+        const int LongestPath = 56;
+
+        var items = new List<Control>();
+        foreach (string folder in FrequentFolders.Shared.Top(FolderKey, Shown + 1).Where(f => f != CurrentPath).Take(Shown))
+        {
+            string text = folder.Length <= LongestPath ? folder : "…" + folder[^(LongestPath - 1)..];
+            var item = new MenuItem { Header = text };
+            ToolTip.SetTip(item, folder);
+            item.Click += (_, _) => _ = NavigateAsync(folder);
+            items.Add(item);
+        }
+
+        if (items.Count == 0) items.Add(new MenuItem { Header = L.T("The folders you go to most will be listed here."), IsEnabled = false });
+
+        if (CurrentPath.Length > 0 && FrequentFolders.Shared.Top(FolderKey, 1000).Contains(CurrentPath))
+        {
+            var forget = new MenuItem { Header = L.T("Take this folder off the list") };
+            forget.Click += (_, _) => FrequentFolders.Shared.Forget(FolderKey, CurrentPath);
+            items.Add(new Separator());
+            items.Add(forget);
+        }
+
+        new ContextMenu { ItemsSource = items }.Open(_foldersButton);
+    }
+
+    private static string What(IReadOnlyList<FileRow> rows) => rows.Count == 1 ? $"\"{rows[0].Name}\"" : L.T("{0} items", rows.Count);
+
+    private void CopySelected() => PutAside(cut: false);
+
+    private void CutSelected() => PutAside(cut: true);
+
+    private void PutAside(bool cut)
+    {
+        List<FileRow> rows = [.. Chosen()];
+        if (rows.Count == 0) return;
+
+        _clipboard = (this, rows, cut);
+        ShowNotice(cut ? L.T("{0} cut. Paste moves them.", What(rows)) : L.T("{0} copied. Paste puts a copy where you are.", What(rows)));
+    }
+
+    // Copies go to either side. A cut only makes sense where it was made: moving between a computer and a server is a transfer.
+    private bool CanPaste() => _clipboard is { } held && (ReferenceEquals(held.Origin, this) || (!held.Cut && ReferenceEquals(held.Origin, Counterpart)));
+
+    private async Task PasteAsync()
+    {
+        if (_clipboard is not { } held) return;
+
+        if (!ReferenceEquals(held.Origin, this))
+        {
+            if (CanPaste()) held.Origin.RequestTransfer(held.Rows);
+            else ShowError(L.T("Something that was cut can only be pasted in the list it was cut from."));
+            return;
+        }
+
+        await CopyIntoCurrentAsync(held.Rows, move: held.Cut);
+        if (held.Cut) _clipboard = null;
+    }
+
+    private async Task DuplicateSelectedAsync()
+    {
+        IReadOnlyList<FileRow> rows = Chosen();
+        if (rows.Count > 0) await CopyIntoCurrentAsync([.. rows], move: false);
+    }
+
+    private bool IsHere(FileRow row) =>
+        string.Equals(Source.Parent(row.Path)?.TrimEnd('/', '\\'), CurrentPath.TrimEnd('/', '\\'), StringComparison.OrdinalIgnoreCase);
+
+    // Copies or moves rows into the folder shown. A copy that would take the name of something there gets a new one.
+    private Task CopyIntoCurrentAsync(IReadOnlyList<FileRow> rows, bool move)
+    {
+        List<string> taken = _rows.Select(r => r.Name).ToList();
+        var made = new List<string>();
+
+        return WorkAsync(move ? L.T("Moving...") : L.T("Copying..."), async token =>
+        {
+            int skipped = 0;
+            int number = 0;
+            foreach (FileRow row in rows)
+            {
+                token.ThrowIfCancellationRequested();
+                number++;
+                ShowNotice(L.T("{0} {1} of {2}: {3}  (Esc stops)", move ? L.T("Moving") : L.T("Copying"), number, rows.Count, row.Name));
+
+                bool exists = taken.Contains(row.Name, StringComparer.OrdinalIgnoreCase);
+                if (move)
+                {
+                    if (IsHere(row)) continue;
+                    if (exists) throw new IOException(L.T("\"{0}\" is already in this folder.", row.Name));
+
+                    await Source.MoveAsync(row, Source.Combine(CurrentPath, row.Name), token);
+                    made.Add(row.Name);
+                    taken.Add(row.Name);
+                }
+                else
+                {
+                    string name = exists ? FileNaming.CopyName(row.Name, row.IsDirectory, taken) : row.Name;
+                    skipped += await Source.CopyAsync(row, Source.Combine(CurrentPath, name), token);
+                    made.Add(name);
+                    taken.Add(name);
+                }
+            }
+
+            return skipped > 0 ? L.T("{0} links were left out: a link is not followed.", skipped) : null;
+        }, made);
+    }
+
+    // One long job at a time on a side, shown on the status line and stopped with Escape. What it made is chosen afterwards.
+    private async Task WorkAsync(string description, Func<CancellationToken, Task<string?>> work, IReadOnlyList<string>? select = null)
+    {
+        if (_operation is not null)
+        {
+            ShowError(L.T("Wait for the job that is running, or press Esc to stop it."));
+            return;
+        }
+
+        var operation = new CancellationTokenSource();
+        _operation = operation;
+        string startedIn = CurrentPath;
+        ShowNotice(description);
+
+        string? note = null;
+        string? problem = null;
+        try
+        {
+            note = await work(operation.Token);
+        }
+        catch (OperationCanceledException) when (operation.IsCancellationRequested)
+        {
+            note = L.T("Stopped.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            problem = ex.Message;
+        }
+        finally
+        {
+            _operation = null;
+            operation.Dispose();
+        }
+
+        // Shown even when the job failed half way, since what it did is there now. Not when the user has gone to another
+        // folder in the meantime, or is on the way to one: the list is theirs, and this would take them back.
+        if (CurrentPath == startedIn && _listingInFlight is null)
+        {
+            await RefreshAsync(searchSubfolders: false);
+            if (select is { Count: > 0 }) SelectNames(select);
+        }
+
+        if (problem is not null) ShowError(problem);
+        else if (note is not null) ShowNotice(note);
+    }
+
+    private async Task NewFileAsync()
+    {
+        if (await _dialogs.AskTextAsync(L.T("New file"), L.T("File name"), null, L.T("Create")) is not string name) return;
+        if (!FileNaming.IsPlainName(name))
+        {
+            ShowError(L.T("A name cannot contain / or \\."));
+            return;
+        }
+
+        await RunAsync(() => Source.CreateFileAsync(Source.Combine(CurrentPath, name), CancellationToken.None));
+        SelectNames([name]);
+    }
+
+    private async Task RenameSeveralAsync()
+    {
+        IReadOnlyList<FileRow> rows = Chosen();
+        BulkRenamePlan? plan = await _dialogs.EditBulkRenameAsync(rows.Select(r => r.Name).ToList(), _rows.Select(r => r.Name).ToList());
+        if (plan is null || plan.Steps.Count == 0) return;
+
+        // Each row follows its file through the steps: a swap goes by a temporary name, which later steps know it by.
+        Dictionary<string, FileRow> current = rows.ToDictionary(r => r.Name, StringComparer.Ordinal);
+        List<string> renamed = plan.Entries.Where(e => e.Problem is null && e.New != e.Old).Select(e => e.New).ToList();
+
+        await RunAsync(async () =>
+        {
+            foreach ((string from, string to) in plan.Steps)
+            {
+                FileRow row = current[from];
+                await Source.RenameAsync(row, to, CancellationToken.None);
+                current.Remove(from);
+                current[to] = row with { Name = to, Path = Source.Combine(Source.Parent(row.Path) ?? CurrentPath, to) };
+            }
+        });
+
+        SelectNames(renamed);
+    }
+
+    private async Task ExtractAsync(bool here)
+    {
+        if (Chosen() is not [{ IsDirectory: false } archive] || Archives.Detect(archive.Name) == ArchiveKind.None) return;
+
+        string name = here ? string.Empty : FileNaming.Unused(Archives.FolderNameFor(archive.Name), _rows.Select(r => r.Name));
+        string folder = here ? CurrentPath : Source.Combine(CurrentPath, name);
+
+        await WorkAsync(L.T("Unpacking {0}...", archive.Name), async token =>
+        {
+            await Source.ExtractAsync(archive, folder, token);
+            return null;
+        }, here ? null : [name]);
+    }
+
+    private async Task CompressAsync()
+    {
+        IReadOnlyList<FileRow> rows = Chosen();
+        if (rows.Count == 0 || !Source.CanRunCommands) return;
+
+        string folderName = Path.GetFileName(CurrentPath.TrimEnd('/', '\\'));
+        string suggestion = rows.Count == 1
+            ? (rows[0].IsDirectory ? rows[0].Name : Path.GetFileNameWithoutExtension(rows[0].Name))
+            : folderName.Length > 0 ? folderName : L.T("Archive");
+        ArchiveChoice? choice = await _dialogs.AskArchiveAsync(suggestion, Source.IsRemote);
+        if (choice is null) return;
+
+        if (_rows.Any(r => string.Equals(r.Name, choice.FileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            ShowError(L.T("\"{0}\" is already in this folder.", choice.FileName));
+            return;
+        }
+
+        List<string> names = rows.Select(r => r.Name).ToList();
+        await WorkAsync(L.T("Packing {0}...", choice.FileName), async token =>
+        {
+            await Source.CompressAsync(CurrentPath, names, choice.FileName, choice.Kind, token);
+            return null;
+        }, [choice.FileName]);
+    }
+
+    // Looks inside the files below this folder. A word with a capital is looked for as written; one without finds either.
+    private async Task SearchContentsAsync()
+    {
+        string query = _find.Text.Trim();
+        _contentSearch?.Cancel();
+        _contentRows = null;
+        _contentQuery = query;
+
+        if (query.Length == 0)
+        {
+            _find.ShowCount(string.Empty, problem: false);
+            await RebuildAsync();
+            return;
+        }
+
+        if (!Source.CanRunCommands)
+        {
+            _find.ShowCount(L.T("This server cannot be given commands."), problem: true);
+            return;
+        }
+
+        var search = new CancellationTokenSource();
+        _contentSearch = search;
+        _find.ShowCount(L.T("Searching..."), problem: false);
+
+        try
+        {
+            ContentSearchResult result = await Source.SearchContentAsync(CurrentPath, query, ignoreCase: !query.Any(char.IsUpper), _find.UseRegex, ContentLimit, search.Token);
+            if (search.IsCancellationRequested) return;
+
+            _contentRows = [.. result.Rows];
+            await RebuildAsync();
+            if (search.IsCancellationRequested) return;
+
+            string count = result.Rows.Count == 0 ? L.T("No matches") : result.Truncated ? L.T("{0}+ files", result.Rows.Count) : L.T("{0} files", result.Rows.Count);
+            _find.ShowCount(result.Note ?? count, problem: result.Note is not null);
+            if (result.Rows.Count > 0) _list.SelectedIndex = 0;
+        }
+        catch (OperationCanceledException) when (search.IsCancellationRequested)
+        {
+            // Replaced by a newer search, or the bar was closed.
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            if (!search.IsCancellationRequested) _find.ShowCount(ex.Message, problem: true);
+        }
+    }
+
     private async Task NewFolderAsync()
     {
         if (await _dialogs.AskTextAsync(L.T("New folder"), L.T("Folder name"), null, L.T("Create")) is not string name) return;
@@ -848,16 +1333,22 @@ public sealed class FilePanel : UserControl
 
     private async Task RenameSelectedAsync()
     {
-        if (SelectedRows.Count != 1) return;
-        FileRow row = SelectedRows[0];
+        if (Chosen().Count > 1)
+        {
+            await RenameSeveralAsync();
+            return;
+        }
+
+        if (Chosen().Count != 1) return;
+        FileRow row = Chosen()[0];
         if (await _dialogs.AskTextAsync(L.T("Rename"), L.T("New name"), row.Name, L.T("Change")) is not string name || name == row.Name) return;
         await RunAsync(() => Source.RenameAsync(row, name, CancellationToken.None));
     }
 
     private async Task ChangePermissionsAsync()
     {
-        if (Source is not RemoteFileSource remote || SelectedRows.Count != 1) return;
-        FileRow row = SelectedRows[0];
+        if (Source is not RemoteFileSource remote || Chosen().Count != 1) return;
+        FileRow row = Chosen()[0];
         if (await _dialogs.AskTextAsync(L.T("Permissions"), L.T("Numeric permission (example: 644)"), OctalOf(row.Permissions), L.T("Apply")) is not string text) return;
 
         if (text.Length != 3 || text.Any(c => c is < '0' or > '7'))
@@ -878,7 +1369,7 @@ public sealed class FilePanel : UserControl
 
     private async Task DeleteSelectedAsync()
     {
-        IReadOnlyList<FileRow> rows = SelectedRows;
+        IReadOnlyList<FileRow> rows = Chosen();
         if (rows.Count == 0) return;
 
         string what = rows.Count == 1 ? $"\"{rows[0].Name}\"" : L.T("{0} items", rows.Count);
@@ -900,6 +1391,16 @@ public sealed class FilePanel : UserControl
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // What was done before it failed is there now, so the list is made again before the reason is shown.
+            try
+            {
+                await RefreshAsync(searchSubfolders: false);
+            }
+            catch (Exception refreshing) when (refreshing is not OutOfMemoryException)
+            {
+                // The connection is likely what failed, and the reason below says so.
+            }
+
             ShowError(ex.Message);
         }
     }

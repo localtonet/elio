@@ -433,6 +433,15 @@ public sealed class AppSettings : IVersionedFile
     /// </summary>
     public bool SuggestCommands { get; set; } = true;
 
+    /// <summary>Whether the command being typed at a prompt is colored by what its parts are: the command, its options, strings, variables, operators.</summary>
+    public bool HighlightCommands { get; set; } = true;
+
+    /// <summary>
+    /// Whether a command that cannot be found is shown in red. Off unless turned on: an alias or a function the shell
+    /// knows is not on the path, and would be shown as missing too.
+    /// </summary>
+    public bool HighlightUnknownCommands { get; set; }
+
     /// <summary>
     /// Whether suggestions start out with what the shell's own history file holds, on this computer and on a server.
     /// Off unless turned on, because that copies commands typed elsewhere into Elio's own files.

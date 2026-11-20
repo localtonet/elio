@@ -1,3 +1,4 @@
+using Elio.Core;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 using Renci.SshNet.Sftp;
@@ -173,6 +174,58 @@ public sealed class SftpConnection : IDisposable
         }
 
         await entry.Source!.DeleteAsync(linked.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>Creates an empty file. Fails if something with that name is already there.</summary>
+    public async Task CreateFileAsync(string path, CancellationToken cancellation)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, Lost);
+        await using SftpFileStream created = await Client.OpenAsync(path, FileMode.CreateNew, FileAccess.Write, linked.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>Moves something into another folder of the same server, refusing to replace what is there.</summary>
+    public Task MoveAsync(RemoteEntry entry, string to, CancellationToken cancellation) => RenameAsync(entry, to, cancellation);
+
+    /// <summary>The first bytes of a file, or all of it if it is shorter.</summary>
+    public async Task<byte[]> ReadAsync(string path, int limit, CancellationToken cancellation)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, Lost);
+        return await SftpCopy.ReadBytesAsync(Client, path, limit, linked.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>Replaces a file with these bytes, only once all of them have arrived, keeping its permissions.</summary>
+    public async Task WriteAsync(string path, byte[] data, CancellationToken cancellation)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, Lost);
+        await SftpCopy.WriteBytesAsync(Client, path, data, linked.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Copies a file, or a folder with everything in it, to another place on this server. A link is left out: one that
+    /// points at a folder could lead back into the folder being copied.
+    /// </summary>
+    /// <returns>How many links were left out.</returns>
+    public async Task<int> CopyAsync(RemoteEntry entry, string to, CancellationToken cancellation)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, Lost);
+        if (entry.IsSymbolicLink) return 1;
+
+        if (!entry.IsDirectory)
+        {
+            await SftpCopy.CopyWithinAsync(Client, entry.FullPath, to, linked.Token).ConfigureAwait(false);
+            return 0;
+        }
+
+        // Copying a folder into itself would never end: what is made inside it is found by the next listing.
+        if (to == entry.FullPath || to.StartsWith(entry.FullPath.TrimEnd('/') + "/", StringComparison.Ordinal))
+            throw new IOException(L.T("A folder cannot be copied into itself."));
+
+        await Client.CreateDirectoryAsync(to, linked.Token).ConfigureAwait(false);
+        int skipped = 0;
+        foreach (RemoteEntry child in await ListAsync(entry.FullPath, linked.Token).ConfigureAwait(false))
+            skipped += await CopyAsync(child, RemotePath.Combine(to, child.Name), linked.Token).ConfigureAwait(false);
+
+        return skipped;
     }
 
     /// <summary>Copies one file here, for short jobs that don't belong in the transfer queue.</summary>

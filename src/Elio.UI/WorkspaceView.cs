@@ -982,6 +982,8 @@ public sealed partial class WorkspaceView : UserControl
             pane.View.Appearance = appearance;
             pane.MatchInset();
             pane.View.Suggestions = AppServices.Settings.SuggestCommands;
+            pane.View.SyntaxColors = AppServices.Settings.HighlightCommands;
+            pane.View.UnknownInRed = AppServices.Settings.HighlightUnknownCommands;
         }
     }
 
@@ -1352,10 +1354,10 @@ public sealed partial class WorkspaceView : UserControl
         void Report(string text, Uri? url) => Dispatcher.UIThread.Post(() => view?.Remote.ShowNotice(text));
         void ReportOther(string text, Uri? url) => Dispatcher.UIThread.Post(() => view?.Local.ShowNotice(text));
 
-        var server = new FileServer(host.Name, cancellation => ConnectFilesAsync(host, Report, cancellation));
+        var server = new FileServer(host.Name, cancellation => ConnectFilesAsync(host, Report, cancellation), (command, cancellation) => RunFilesCommandAsync(host, Report, command, cancellation), host.Id.ToString("N"));
         view = other is null
-            ? new FilesView(server.Connect, _dialogs)
-            : new FilesView(server, new FileServer(other.Name, cancellation => ConnectFilesAsync(other, ReportOther, cancellation)), _dialogs, sameServer: other.Id == host.Id);
+            ? new FilesView(server, null, _dialogs)
+            : new FilesView(server, new FileServer(other.Name, cancellation => ConnectFilesAsync(other, ReportOther, cancellation), (command, cancellation) => RunFilesCommandAsync(other, ReportOther, command, cancellation), other.Id.ToString("N")), _dialogs, sameServer: other.Id == host.Id);
         var pane = new FilesPane(host, view, other) { Owner = this };
         view.GotFocus += (_, _) => pane.Owner.MakeActive(pane);
 
@@ -1401,7 +1403,11 @@ public sealed partial class WorkspaceView : UserControl
     private async Task<bool> CanCloseAsync(IEnumerable<ContentPane> panes)
     {
         int running = panes.OfType<FilesPane>().SelectMany(p => p.View.Queue.Jobs).Count(j => !j.IsFinished);
-        return running == 0 || await _dialogs.ConfirmAsync(L.T("Transfer in progress"), L.T("{0} transfers will be stopped. Unfinished files can be resumed later.", running), L.T("Close"), danger: true);
+        if (running > 0 && !await _dialogs.ConfirmAsync(L.T("Transfer in progress"), L.T("{0} transfers will be stopped. Unfinished files can be resumed later.", running), L.T("Close"), danger: true)) return false;
+
+        // A file open in the editor with changes that were not saved is lost with the pane.
+        return !panes.OfType<FilesPane>().Any(p => p.View.HasUnsavedChanges)
+            || await _dialogs.ConfirmAsync(L.T("Unsaved changes"), L.T("A file in the editor has changes that were not saved. They will be lost."), L.T("Close"), danger: true);
     }
 
     private async Task ClosePaneAsync(WorkspaceTab tab, ContentPane pane)
@@ -1792,6 +1798,9 @@ public sealed partial class WorkspaceView : UserControl
         pane.View.HistoryScope = host.Id.ToString("N");
         AppServices.SeedHistory(host);
         pane.View.Suggestions = AppServices.Settings.SuggestCommands;
+        pane.View.SyntaxColors = AppServices.Settings.HighlightCommands;
+        pane.View.UnknownInRed = AppServices.Settings.HighlightUnknownCommands;
+        if (host.Kind == HostKind.Local) pane.View.Commands = AppServices.LocalCommands;
         pane.View.InputTargets = () => InputTargetsFor(pane);
         pane.View.ZmodemHost = new PaneZmodemHost(pane);
         ConfigurePaste(pane);
@@ -2243,6 +2252,16 @@ public sealed partial class WorkspaceView : UserControl
         pane.ForwardProblems = transport.ForwardProblems;
         pane.HideStatus();
 
+        // What the server has on its path, so that the commands typed can be told from what is not there.
+        if (AppServices.Settings.HighlightCommands)
+        {
+            _ = Task.Run(async () =>
+            {
+                string names = await transport.ReadCommandNamesAsync(CancellationToken.None);
+                if (names.Length > 0) Dispatcher.UIThread.Post(() => pane.View.Commands = CommandIndex.FromListing(names, authoritative: true));
+            });
+        }
+
         // A server never typed on from here has nothing to suggest yet, so its shell is asked what it remembers.
         if (AppServices.WantsHistoryFor(host))
         {
@@ -2255,6 +2274,11 @@ public sealed partial class WorkspaceView : UserControl
     // Asks on the UI thread, because the transfer queue calls this from its own.
     private Task<SftpConnection> ConnectFilesAsync(HostEntry host, Action<string, Uri?> report, CancellationToken cancellation) =>
         Dispatcher.UIThread.InvokeAsync(() => WithLoginChecksAsync(host, () => { }, report, (path, policy) => SftpConnection.ConnectAsync(path, policy, cancellation), cancellation));
+
+    // For what the file screen cannot do over SFTP, such as unpacking an archive or looking inside files. The server was
+    // already reached for the files, so its key is known and its login accepted: a command that cannot get in says so.
+    private Task<CommandResult> RunFilesCommandAsync(HostEntry host, Action<string, Uri?> report, string command, CancellationToken cancellation) =>
+        Dispatcher.UIThread.InvokeAsync(() => WithLoginChecksAsync(host, () => { }, report, (path, policy) => SshCommandRunner.RunAsync(path, command, policy, cancellation), cancellation));
 
     /// <summary>Connects, stopping to ask the user about unknown keys and refused logins.</summary>
     private async Task<T> WithLoginChecksAsync<T>(HostEntry host, Action onGiveUp, Action<string, Uri?> report, Func<IReadOnlyList<SshEndpoint>, HostKeyPolicy, Task<T>> connect, CancellationToken cancellation)

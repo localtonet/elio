@@ -10,6 +10,9 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Fonts\*.ttf" LogicalName="Elio.UI.Fonts.%(Filename)%(Extension)" />
+    <!-- The same two again for the controls that draw text with Avalonia: the editor and the preview show code, which needs letters of one width. -->
+    <AvaloniaResource Include="Fonts\JetBrainsMono-Regular.ttf" />
+    <AvaloniaResource Include="Fonts\JetBrainsMono-Bold.ttf" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Elio.Tests" />

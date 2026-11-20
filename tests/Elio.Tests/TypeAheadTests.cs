@@ -121,4 +121,16 @@ public sealed class TypeAheadTests
 
         Assert.Equal(4, typeAhead.Type("c", Names, 2, After(100)));
     }
+
+    [Fact]
+    public void IsTyping_IsTrueOnlyWhileLettersWereTypedRecently()
+    {
+        var typeAhead = new TypeAhead();
+        Assert.False(typeAhead.IsTyping(Start));
+
+        typeAhead.Type("b", Names, -1, Start);
+
+        Assert.True(typeAhead.IsTyping(After(300)));
+        Assert.False(typeAhead.IsTyping(After(5000)));
+    }
 }

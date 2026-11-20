@@ -121,6 +121,11 @@ public static class AppServices
         LibraryChanged?.Invoke();
     }
 
+    private static CommandIndex? _localCommands;
+
+    /// <summary>The commands on this computer's path, read once and shared by every terminal that runs here.</summary>
+    public static CommandIndex LocalCommands => _localCommands ??= CommandIndex.ForThisComputer();
+
     public static TerminalAppearance Appearance => new(
         Settings.FontSize,
         Settings.Ligatures,

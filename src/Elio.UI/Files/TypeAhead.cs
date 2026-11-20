@@ -16,6 +16,9 @@ public sealed class TypeAhead(TimeSpan timeout)
     /// <summary>The letters taken so far.</summary>
     public string Typed => _typed;
 
+    /// <summary>Whether letters were typed a moment ago, so that a space is part of a name and not a key of its own.</summary>
+    public bool IsTyping(DateTime now) => _typed.Length > 0 && now - _last <= timeout;
+
     /// <summary>Forgets what was typed.</summary>
     public void Reset() => _typed = string.Empty;
 

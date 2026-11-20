@@ -1043,6 +1043,7 @@ public sealed partial class TerminalSession : IAsyncDisposable
             Ghostty.TrackedGridRefFree(_outputStart);
             Ghostty.TrackedGridRefFree(_lastOutputStart);
             Ghostty.TrackedGridRefFree(_lastOutputEnd);
+            Ghostty.TrackedGridRefFree(_inputStart);
             Ghostty.ImageIteratorFree(_imageIterator);
             Ghostty.MouseEventFree(_mouseEvent);
             Ghostty.MouseEncoderFree(_mouseEncoder);

@@ -27,6 +27,13 @@ internal static class ElioStyle
     public static readonly TimeSpan Fade = TimeSpan.FromMilliseconds(120);
 
     /// <summary>The system's own interface font on each platform, with Inter first for those who installed it.</summary>
+    /// <summary>
+    /// The font of code and plain text in the editor and the preview: the one the terminal has, which comes with the app so
+    /// that it looks the same everywhere, and then what the system has by name. Cascadia Mono is left out on purpose: it is
+    /// a variable font, and through Skia on Windows it comes out bold.
+    /// </summary>
+    public static readonly FontFamily CodeFont = new("fonts:ElioMono#JetBrains Mono, Consolas, Menlo, DejaVu Sans Mono, Liberation Mono, Roboto Mono, monospace");
+
     public static readonly FontFamily Font = new("Inter, Segoe UI Variable Text, Segoe UI, -apple-system, San Francisco, Helvetica Neue, Ubuntu, sans-serif");
 
     public static readonly BoxShadows DialogShadow = new(
@@ -68,6 +75,7 @@ internal static class ElioStyle
     public const string IconPin = "M5.5,2.5 H10.5 L9.8,6.6 L12,9 H4 L6.2,6.6 Z M8,9 V13.5";
     public const string IconUp = "M8,12.5 V3.5 M4.5,7 L8,3.5 L11.5,7";
     public const string IconDown = "M8,3.5 V12.5 M4.5,9 L8,12.5 L11.5,9";
+    public const string IconLines = "M2.5,4 H13.5 M2.5,8 H13.5 M2.5,12 H9";
     public const string IconSubfolders = "M1.5,2.5 H5 L6,3.7 H9.5 V6.5 H1.5 Z M3.5,6.5 V11.5 H6 M6,9 H9 L9.8,10 H14.5 V13.5 H6 Z";
     public const string IconEye = "M1.5,8 C3,5 5.5,3.5 8,3.5 C10.5,3.5 13,5 14.5,8 C13,11 10.5,12.5 8,12.5 C5.5,12.5 3,11 1.5,8 Z M8,6 A2,2 0 1 1 8,10 A2,2 0 1 1 8,6";
 

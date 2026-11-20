@@ -39,10 +39,14 @@ Website: [elio.sh](https://elio.sh)
 **Or from a package manager.** Elio updates itself, so these only install it:
 
 ```
-winget install Localtonet.Elio                              # Windows
 scoop bucket add localtonet https://github.com/localtonet/scoop-bucket && scoop install elio
 brew install --cask localtonet/tap/elio                     # macOS
 ```
+
+<!--
+Not on winget yet, because the package cannot be submitted for now. When it can, put this line back at the top of the block above:
+winget install Localtonet.Elio                              # Windows
+-->
 
 On Linux, install the `.deb` from the releases page, or unpack the `.tar.gz`.
 
@@ -99,6 +103,7 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 **Typing less**
 
 - **Command suggestions.** While you type, a short list opens under the cursor and the best match is shown dimmed after it. The right arrow accepts, Alt+Up and Alt+Down choose another. Suggestions come from the commands you ran before on that server, from the shell's own history file (and the server's, read once over SSH), and from a set of common commands; what you typed may match in the middle of a command, not only at its start. It can be turned off in Settings.
+- **Colors while you type.** The command line is colored as it is typed, the way zsh-syntax-highlighting does it: commands that exist on the path and shell builtins in green, options in cyan, strings in yellow, variables in blue, pipes and redirections in magenta, comments grey, an unclosed quote in red. The colors are the terminal theme's own and nothing is installed on the server: when a connection opens it is asked once, over the same connection, which commands it has on its path. Text the shell has colored itself is left alone, so a shell with its own highlighting is not painted over. Elio follows the line on screen, so the colors stay through Tab, the arrow keys and editing in a shell that marks its prompts (**Mark commands in this shell**); in other shells the line is followed from the first character typed at a prompt, which leaves a line recalled with Up uncolored until Enter. Commands that cannot be found can be shown in red in Settings. That is off by default, because an alias or a function the shell knows is not on the path and would show red as well. **Color the command while it is typed** in Settings turns all of it off.
 - **Command history** (`Ctrl+Shift+H`) opens a searchable window of everything you have entered; picking a line sends it to the terminal.
 - Copy on select, paste with right click, paste with the middle button, and a warning before a multi-line paste runs.
 - Dropping files on a terminal types their paths, safely quoted for the shell in it.
@@ -193,6 +198,13 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 - Interrupted transfers continue where they stopped, and a half-written file never replaces a good one.
 - Drag and drop of files and folders, new folders, rename, delete and permissions.
 - **Edit in place**: open a remote file in your editor and every save is uploaded. If the file changed on the server in the meantime, Elio tells you instead of silently replacing it.
+- **A built-in editor.** `F4`, or **Edit** in the right-click menu, opens a text file in Elio itself, on this computer or on a server, and on a phone too, where there is no other program to edit in. It has find and replace (plain or regular expression, with every match counted), go to line, undo, auto-indent, word wrap and a text size of your choice. On a phone the toolbar folds into a menu and a row of keys above the keyboard adds Tab and the symbols code needs. Files keep their line endings and byte order mark, `Ctrl+S` saves, a file that changed on the server in the meantime is not overwritten without asking, and leaving with unsaved changes asks first. Files over 2 MB, and files that are not text, are not opened.
+- **Preview.** `Space` shows the chosen file without copying it anywhere: text and code, pictures, the names in a folder, or the first bytes of anything else. The arrows in its corner (or `Alt`+`Up` / `Alt`+`Down`) go to the previous or next file in the list, and **Edit** there opens the editor.
+- **New file, copy, cut, paste and duplicate.** **New file** (`Ctrl+N`), **Copy** (`Ctrl+C`), **Cut** (`Ctrl+X`), **Paste** (`Ctrl+V`) and **Duplicate** (`Ctrl+D`) work in a folder and between folders of one side, and a copy pasted on the other side is a transfer. A copy that would take the name of something there is named "report copy.txt" instead, and nothing is ever replaced. On a server a copy is made by the server itself when it can be given commands. `Esc` stops a job that is running.
+- **Rename several.** With more than one file chosen, **Rename several...** (`F2`) offers find and replace (regular expressions included), numbering with a pattern, upper and lower case, and text added before or after the name, and shows what each file would be called before anything is renamed. Names that clash, with each other or with something already there, are pointed out and block the rename; swaps and chains are carried out safely.
+- **Folders you go to often.** The pin button lists the folders you open most, kept apart for this computer and for each server, with recent ones counting for more.
+- **Search inside files.** The last button of the search bar looks for words inside the files below the folder, with `Enter`: on a server by running `grep` (or `rg` if it has it), on this computer by reading the files itself. The results show the line that matched, and `Enter` on one goes to the file. It needs a server that can be given commands.
+- **Archives.** **Extract here**, **Extract to a new folder** and **Compress...** on a server use `tar`, `unzip` and `zip` there; on this computer Elio makes `.zip`, `.tar` and `.tar.gz` and opens those and `.gz` itself, and never follows a link or a path that leads out of the folder it unpacks into. A zip or a .gz is never unpacked over a file that is there.
 - **Zmodem** (`sz` and `rz`) straight in the terminal.
 
 ![Two servers side by side in the file browser, with finished server-to-server transfers in the queue below](docs/screenshots/files-two-servers-dark.webp)
@@ -269,6 +281,7 @@ The interface is available in 30 languages: Arabic, Bengali, Chinese (Simplified
 
 The same app runs on Android and iOS with a layout made for a small screen: the terminal fills it, the server list slides in from the side, and a row of keys above the keyboard adds what a phone keyboard lacks: Esc, Tab, Ctrl, Alt, the arrows and the symbols a shell needs. A finger scrolls the history, and two fingers resize the text. A keyboard button in the corner brings the keyboard up or puts it away.
 
+- **Files.** On a screen too narrow for two lists side by side, the file screen puts them one above the other, each with the whole width. Everything in the right-click menu is reached by pressing and holding, and the built-in editor, which is the only editor a phone has, brings up a row of the keys code needs above the keyboard.
 - **App lock.** **Lock Elio with this device's fingerprint, face or passcode** in Settings asks for it when the app is opened and when it comes back from the background. On Android a locked Elio is also kept out of screenshots and shown blank in the list of recent apps.
 - **Scan to sync.** **Scan QR code** in the Sync window reads the code another device shows under **Add another device**, and the phone's own camera app opens the same link.
 

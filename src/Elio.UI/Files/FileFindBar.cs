@@ -14,23 +14,31 @@ namespace Elio.UI.Files;
 /// </summary>
 public sealed class FileFindBar : Border
 {
+    private const double NarrowWidth = 340;
+
     private readonly TextBox _box = new() { MinHeight = 26, Padding = new Thickness(8, 3), FontSize = 12, CornerRadius = new CornerRadius(6), VerticalContentAlignment = VerticalAlignment.Center, Tag = "panel-find-box" };
     private readonly TextBlock _count = new() { FontSize = ElioStyle.SmallFontSize, Foreground = ElioColors.TextMuted, VerticalAlignment = VerticalAlignment.Center, MinWidth = 52, Margin = new Thickness(6, 0, 4, 0), TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Tag = "panel-find-count" };
     private readonly Button _regex;
     private readonly Button _subfolders;
+    private readonly Button _contents;
+    private readonly StackPanel _buttons;
+    private bool _narrow;
     private bool _useRegex;
     private bool _includeSubfolders;
+    private bool _searchContents;
     private string _announced = string.Empty;
 
     public FileFindBar(bool useRegex)
     {
         _regex = Tool(".*", L.T("Read as a regular expression: on / off"), "panel-find-regex");
         _subfolders = Tool(ElioStyle.IconSubfolders, L.T("Look in subfolders too: on / off. Turning it off stops a search that is still running."), "panel-find-subfolders");
+        _contents = Tool(ElioStyle.IconLines, L.T("Look inside files for the words typed: on / off. Press Enter to search."), "panel-find-contents");
         Button close = Tool(ElioStyle.IconClose, L.T("Close"), "panel-find-close");
         close.Click += (_, _) => Closed?.Invoke();
 
         _regex.Click += (_, _) => UseRegex = !UseRegex;
         _subfolders.Click += (_, _) => IncludeSubfolders = !IncludeSubfolders;
+        _contents.Click += (_, _) => SearchContents = !SearchContents;
         UseRegex = useRegex;
 
         // The box reports a change a moment after it was made, so a text set from outside is told apart by what it says.
@@ -42,8 +50,7 @@ public sealed class FileFindBar : Border
         };
         _box.AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
 
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Children = { _count, _regex, _subfolders, close } };
-        DockPanel.SetDock(buttons, Dock.Right);
+        _buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, HorizontalAlignment = HorizontalAlignment.Right, Children = { _count, _regex, _subfolders, _contents, close } };
 
         Background = ElioColors.Elevated;
         BorderBrush = ElioColors.Border;
@@ -53,7 +60,30 @@ public sealed class FileFindBar : Border
         Margin = new Thickness(8, 0, 8, 4);
         IsVisible = false;
         Tag = "panel-find-bar";
-        Child = new DockPanel { LastChildFill = true, Children = { buttons, _box } };
+        var layout = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), RowDefinitions = new RowDefinitions("Auto,Auto") };
+        layout.Children.Add(_box);
+        layout.Children.Add(_buttons);
+        Child = layout;
+        Arrange(narrow: false);
+
+        // The box needs room to type in: in a panel too narrow for it and the buttons side by side, the buttons go under it.
+        SizeChanged += (_, e) =>
+        {
+            bool narrow = e.NewSize.Width < NarrowWidth;
+            if (narrow != _narrow) Arrange(narrow);
+        };
+    }
+
+    private void Arrange(bool narrow)
+    {
+        _narrow = narrow;
+        Grid.SetRow(_box, 0);
+        Grid.SetColumn(_box, 0);
+        Grid.SetColumnSpan(_box, narrow ? 2 : 1);
+        _box.Margin = narrow ? new Thickness(0, 0, 0, 3) : default;
+        Grid.SetRow(_buttons, narrow ? 1 : 0);
+        Grid.SetColumn(_buttons, narrow ? 0 : 1);
+        Grid.SetColumnSpan(_buttons, narrow ? 2 : 1);
     }
 
     /// <summary>The text or one of the two switches was changed.</summary>
@@ -88,10 +118,31 @@ public sealed class FileFindBar : Border
             bool changed = _useRegex != value;
             _useRegex = value;
             Mark(_regex, value);
-            _box.PlaceholderText = value ? L.T("Regular expression") : L.T("Name, or a pattern such as *.log");
+            ShowPlaceholder();
             if (changed) Changed?.Invoke(false);
         }
     }
+
+    /// <summary>
+    /// Whether what is typed is looked for inside the files, and not in their names. That takes a while, so it only
+    /// starts when Enter is pressed.
+    /// </summary>
+    public bool SearchContents
+    {
+        get => _searchContents;
+        set
+        {
+            bool changed = _searchContents != value;
+            _searchContents = value;
+            Mark(_contents, value);
+            ShowPlaceholder();
+            if (changed) Changed?.Invoke(false);
+        }
+    }
+
+    private void ShowPlaceholder() => _box.PlaceholderText = _searchContents
+        ? (_useRegex ? L.T("Regular expression to look for inside files, then Enter") : L.T("Words to look for inside files, then Enter"))
+        : (_useRegex ? L.T("Regular expression") : L.T("Name, or a pattern such as *.log"));
 
     public bool IncludeSubfolders
     {

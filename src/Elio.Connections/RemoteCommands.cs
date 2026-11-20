@@ -94,7 +94,9 @@ public static class Archives
 
     /// <summary>
     /// Unpacks an archive into a folder, made if it is not there. Paths should be complete ones. <c>tar</c> and
-    /// <c>unzip</c> do not unpack to places above the folder, and cut a leading slash off the names in the archive.
+    /// <c>unzip</c> do not unpack to places above the folder, and cut a leading slash off the names in the archive. A zip never
+    /// replaces a file that is already there and a .gz neither; <c>tar</c> does what it always does, since the option that
+    /// would stop it is missing from the smaller ones.
     /// </summary>
     public static string ExtractCommand(string archivePath, string targetFolder, ArchiveKind kind)
     {
@@ -105,7 +107,7 @@ public static class Archives
         switch (kind)
         {
             case ArchiveKind.Zip:
-                return $"{make} && unzip -o -q {archive} -d {target}";
+                return $"{make} && unzip -n -q {archive} -d {target}";
             case ArchiveKind.Tar:
                 return $"{make} && tar -xf {archive} -C {target}";
 
@@ -118,7 +120,11 @@ public static class Archives
                 return $"{make} && tar -xJf {archive} -C {target}";
 
             case ArchiveKind.Gz:
-                return $"{make} && gunzip -c {archive} > {PosixQuote.Path(UnpackedPath(archivePath, targetFolder))}";
+            {
+                // Never over a file that is there: what was in the folder is not the archive's to replace.
+                string unpacked = PosixQuote.Path(UnpackedPath(archivePath, targetFolder));
+                return $"{make} && [ ! -e {unpacked} ] && gunzip -c {archive} > {unpacked}";
+            }
 
             default:
                 return $"echo {PosixQuote.Single(L.T("This is not an archive that can be opened here."))} >&2; exit 2";

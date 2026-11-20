@@ -762,6 +762,8 @@ public sealed partial class DialogHost : Panel
         CheckBox keepShells = Check(L.T("Keep local shells running when Elio closes, and pick them up again"), settings.KeepShellsRunning, "keep-shells");
         CheckBox suggestions = Check(L.T("Suggest commands typed before while typing (Right arrow accepts, Alt with Up or Down chooses)"), settings.SuggestCommands, "suggestions");
         CheckBox seedSuggestions = Check(L.T("Start suggestions from the shell's own history file"), settings.SeedSuggestionsFromShellHistory, "seed-suggestions");
+        CheckBox highlightCommands = Check(L.T("Color the command while it is typed"), settings.HighlightCommands, "highlight-commands");
+        CheckBox highlightUnknown = Check(L.T("Show commands that cannot be found in red (aliases and functions are not known, and show red too)"), settings.HighlightUnknownCommands, "highlight-unknown");
         TextBox editor = Input(settings.EditorCommand, tag: "editor");
         editor.PlaceholderText = L.T("A program's path or name, such as {0} or {1}", "code", @"C:\Program Files\Notepad++\notepad++.exe");
 
@@ -804,6 +806,8 @@ public sealed partial class DialogHost : Panel
             settings.KeepShellsRunning = keepShells.IsChecked == true;
             settings.SuggestCommands = suggestions.IsChecked == true;
             settings.SeedSuggestionsFromShellHistory = seedSuggestions.IsChecked == true;
+            settings.HighlightCommands = highlightCommands.IsChecked == true;
+            settings.HighlightUnknownCommands = highlightUnknown.IsChecked == true;
             settings.EditorCommand = (editor.Text ?? string.Empty).Trim();
             settings.CheckForUpdates = updates.IsChecked == true;
             if (helloOffered && (hello.IsChecked == true) != vault.HelloEnabled) _ = ChangeHelloAsync(vault, hello.IsChecked == true);
@@ -813,7 +817,7 @@ public sealed partial class DialogHost : Panel
         };
         cancel.Click += (_, _) => result.TrySetResult(false);
 
-        return Frame(L.T("Settings"), new ScrollViewer { MaxHeight = 520, Margin = ScrollOutset, Content = new StackPanel { Margin = ScrollInset, Spacing = 12, Children = { new TextBlock { Text = L.T("Elio {0}", UpdateCheck.RunningText), FontSize = 12, Foreground = ElioColors.TextMuted, Tag = "version" }, Field(L.T("Language (applies after a restart)"), language), Field(L.T("Theme"), theme), followSystem, Field(L.T("Theme while the system is light"), lightTheme), Field(L.T("Font size"), size), light, ligatures, restore, updates, copy, paste, groupTabs, keepShells, suggestions, seedSuggestions, hello, lockApp, Field(L.T("Editor for remote files (empty for the system's)"), editor), Field(L.T("Server that passes shared terminals along (empty uses the sync server)"), shareServer), Field(L.T("Key that shows or hides the window from anywhere (for example Ctrl+Oem3, applies after a restart)"), summon), fromTop, mcp, Field(L.T("Text to highlight (one per line: #ff5555 error)"), highlights) } } }, cancel, save);
+        return Frame(L.T("Settings"), new ScrollViewer { MaxHeight = 520, Margin = ScrollOutset, Content = new StackPanel { Margin = ScrollInset, Spacing = 12, Children = { new TextBlock { Text = L.T("Elio {0}", UpdateCheck.RunningText), FontSize = 12, Foreground = ElioColors.TextMuted, Tag = "version" }, Field(L.T("Language (applies after a restart)"), language), Field(L.T("Theme"), theme), followSystem, Field(L.T("Theme while the system is light"), lightTheme), Field(L.T("Font size"), size), light, ligatures, restore, updates, copy, paste, groupTabs, keepShells, suggestions, seedSuggestions, highlightCommands, highlightUnknown, hello, lockApp, Field(L.T("Editor for remote files (empty for the system's)"), editor), Field(L.T("Server that passes shared terminals along (empty uses the sync server)"), shareServer), Field(L.T("Key that shows or hides the window from anywhere (for example Ctrl+Oem3, applies after a restart)"), summon), fromTop, mcp, Field(L.T("Text to highlight (one per line: #ff5555 error)"), highlights) } } }, cancel, save);
     });
 
     // Windows shows its own prompt, and waits for it, so this stays off the thread the window lives on.

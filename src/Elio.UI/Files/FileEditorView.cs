@@ -18,11 +18,6 @@ namespace Elio.UI.Files;
 /// </summary>
 public sealed class FileEditorView : UserControl
 {
-    // The first of these that the computer has is used. The last one is whatever the system calls its monospaced font,
-    // which is what Android and most Linux desktops answer to. Cascadia Mono is left out on purpose: it is a variable
-    // font, and through Skia on Windows it comes out bold (the terminal bundles JetBrains Mono for the same reason).
-    private const string MonospaceFonts = "Consolas, Menlo, DejaVu Sans Mono, Liberation Mono, Roboto Mono, monospace";
-
     private const double CompactWidth = 520;
     private const double MinFontSize = 8;
     private const double MaxFontSize = 32;
@@ -108,7 +103,7 @@ public sealed class FileEditorView : UserControl
             AcceptsTab = true,
             IsReadOnly = readOnly,
             NewLine = "\n",
-            FontFamily = new FontFamily(MonospaceFonts),
+            FontFamily = ElioStyle.CodeFont,
             FontSize = ClampSize(AppServices.Settings.EditorFontSize),
             Padding = new Thickness(_phone ? 10 : 14, 10),
             CornerRadius = default,

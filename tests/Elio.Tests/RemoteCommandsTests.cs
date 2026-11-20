@@ -129,7 +129,7 @@ public sealed class RemoteCommandsTests : IDisposable
         Assert.Equal(expected, Archives.FolderNameFor(archive));
 
     [Theory]
-    [InlineData(ArchiveKind.Zip, "mkdir -p '/srv/out dir' && unzip -o -q '/srv/my a.zip' -d '/srv/out dir'")]
+    [InlineData(ArchiveKind.Zip, "mkdir -p '/srv/out dir' && unzip -n -q '/srv/my a.zip' -d '/srv/out dir'")]
     [InlineData(ArchiveKind.Tar, "mkdir -p '/srv/out dir' && tar -xf '/srv/my a.zip' -C '/srv/out dir'")]
     [InlineData(ArchiveKind.TarGz, "mkdir -p '/srv/out dir' && tar -xzf '/srv/my a.zip' -C '/srv/out dir'")]
     [InlineData(ArchiveKind.TarBz2, "mkdir -p '/srv/out dir' && tar -xjf '/srv/my a.zip' -C '/srv/out dir'")]
@@ -140,8 +140,8 @@ public sealed class RemoteCommandsTests : IDisposable
     [Fact]
     public void ExtractCommand_ForAFilePackedOnItsOwn_NamesTheResultAfterTheFile()
     {
-        Assert.Equal("mkdir -p '/out' && gunzip -c '/srv/notes.txt.gz' > '/out/notes.txt'", Archives.ExtractCommand("/srv/notes.txt.gz", "/out", ArchiveKind.Gz));
-        Assert.Equal("mkdir -p '/' && gunzip -c '/a.GZ' > '/a'", Archives.ExtractCommand("/a.GZ", "/", ArchiveKind.Gz));
+        Assert.Equal("mkdir -p '/out' && [ ! -e '/out/notes.txt' ] && gunzip -c '/srv/notes.txt.gz' > '/out/notes.txt'", Archives.ExtractCommand("/srv/notes.txt.gz", "/out", ArchiveKind.Gz));
+        Assert.Equal("mkdir -p '/' && [ ! -e '/a' ] && gunzip -c '/a.GZ' > '/a'", Archives.ExtractCommand("/a.GZ", "/", ArchiveKind.Gz));
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public sealed class RemoteCommandsTests : IDisposable
     {
         string command = Archives.ExtractCommand("/srv/it's $(x).zip", "/srv/a;b", ArchiveKind.Zip);
 
-        Assert.Equal("mkdir -p '/srv/a;b' && unzip -o -q '/srv/it'\\''s $(x).zip' -d '/srv/a;b'", command);
+        Assert.Equal("mkdir -p '/srv/a;b' && unzip -n -q '/srv/it'\\''s $(x).zip' -d '/srv/a;b'", command);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class RemoteCommandsTests : IDisposable
     {
         string command = Archives.ExtractCommand("-evil.zip", "-out", ArchiveKind.Zip);
 
-        Assert.Equal("mkdir -p './-out' && unzip -o -q './-evil.zip' -d './-out'", command);
+        Assert.Equal("mkdir -p './-out' && unzip -n -q './-evil.zip' -d './-out'", command);
     }
 
     [Fact]

@@ -65,6 +65,60 @@ internal static class SftpCopy
         await Task.Run(() => Publish(to, part, targetPath, original.LastWriteTimeUtc, ModeOf(original)), cancellation).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Replaces a file with these bytes the way an upload does: written beside it first and swapped in at the end, so a
+    /// failure leaves what was there alone, and the file keeps the permissions it had.
+    /// </summary>
+    public static async Task WriteBytesAsync(SftpClient client, string remotePath, byte[] data, CancellationToken cancellation)
+    {
+        string part = remotePath + PartSuffix;
+        long start = 0;
+
+        await using (SftpFileStream target = await client.OpenAsync(part, FileMode.Create, FileAccess.Write, cancellation).ConfigureAwait(false))
+        {
+            ReadAt read = (buffer, offset, _) =>
+            {
+                data.AsMemory((int)offset, buffer.Length).CopyTo(buffer);
+                return ValueTask.CompletedTask;
+            };
+
+            await Task.Run(() => SendAsync(read, target, start, data.Length, static _ => { }, cancellation), cancellation).ConfigureAwait(false);
+        }
+
+        SftpFileAttributes written = await client.GetAttributesAsync(part, cancellation).ConfigureAwait(false);
+        if (written.Size != data.Length) throw new IOException(L.T("The file on the server is {0} bytes, it should be {1}.", written.Size, data.Length));
+
+        await Task.Run(() => Publish(client, part, remotePath, DateTime.UtcNow, null), cancellation).ConfigureAwait(false);
+    }
+
+    /// <summary>The first bytes of a file, or all of it if it is shorter.</summary>
+    public static async Task<byte[]> ReadBytesAsync(SftpClient client, string remotePath, int limit, CancellationToken cancellation)
+    {
+        await using SftpFileStream source = await client.OpenAsync(remotePath, FileMode.Open, FileAccess.Read, cancellation).ConfigureAwait(false);
+
+        var result = new MemoryStream();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
+        {
+            while (result.Length < limit)
+            {
+                int read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, limit - result.Length)), cancellation).ConfigureAwait(false);
+                if (read == 0) break;
+                result.Write(buffer, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return result.ToArray();
+    }
+
+    /// <summary>Copies a file to another place on the same server, through this connection.</summary>
+    public static Task CopyWithinAsync(SftpClient client, string sourcePath, string targetPath, CancellationToken cancellation) =>
+        CopyAsync(client, client, sourcePath, targetPath, static _ => { }, static _ => { }, cancellation);
+
     /// <summary>Fills a buffer with the source's bytes from a place in it, wherever the source is.</summary>
     private delegate ValueTask ReadAt(Memory<byte> buffer, long offset, CancellationToken cancellation);
 

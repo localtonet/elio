@@ -24,6 +24,12 @@ public sealed class CommandIndex
     private readonly object _gate = new();
     private HashSet<string> _listed;
     private readonly HashSet<string> _added;
+
+    // Folders of $PATH that gave no names: empty ones, and ones this program may run commands from but not look into, such as
+    // /system/bin on Android. A word that is not listed is looked for in them by name.
+    private string[] _unlisted = [];
+    private readonly HashSet<string> _notThere = [];
+    private const int MaxRemembered = 1024;
     private int _scanning;
     private volatile bool _loaded;
 
@@ -107,12 +113,53 @@ public sealed class CommandIndex
     {
         if (string.IsNullOrEmpty(word) || word.AsSpan().ContainsAny('/', '\\') || word[0] is '~' or '$' or '.') return CommandState.Unknown;
 
+        string[] unlisted;
         lock (_gate)
         {
             if (_listed.Contains(word) || _added.Contains(word)) return CommandState.Exists;
+            if (_notThere.Contains(word)) return Missed();
+            unlisted = _unlisted;
         }
 
-        return _authoritative && _loaded ? CommandState.Missing : CommandState.Unknown;
+        if (unlisted.Length > 0 && IsInUnlisted(unlisted, word))
+        {
+            lock (_gate) _added.Add(word);
+            return CommandState.Exists;
+        }
+
+        lock (_gate)
+        {
+            if (unlisted.Length > 0)
+            {
+                if (_notThere.Count >= MaxRemembered) _notThere.Clear();
+                _notThere.Add(word);
+            }
+        }
+
+        return Missed();
+    }
+
+    private CommandState Missed() => _authoritative && _loaded ? CommandState.Missing : CommandState.Unknown;
+
+    // A folder that cannot be listed can still be asked about one name at a time.
+    internal static bool IsInUnlisted(string[] folders, string word)
+    {
+        if (OperatingSystem.IsWindows()) return false;
+
+        foreach (string folder in folders)
+        {
+            try
+            {
+                string file = Path.Combine(folder, word);
+                if (File.Exists(file) && IsExecutable(file)) return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                // Not a name this folder can hold.
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -132,8 +179,15 @@ public sealed class CommandIndex
         {
             try
             {
-                HashSet<string> names = Read(path, windows, ExtensionsFrom(pathExt), _ignoreCase);
-                lock (_gate) _listed = names;
+                var unlisted = new List<string>();
+                HashSet<string> names = Read(path, windows, ExtensionsFrom(pathExt), _ignoreCase, unlisted);
+                lock (_gate)
+                {
+                    _listed = names;
+                    _unlisted = [.. unlisted];
+                    _notThere.Clear();
+                }
+
                 _loaded = true;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -181,7 +235,7 @@ public sealed class CommandIndex
         return bare.Length == 0 ? [fileName] : [fileName, bare];
     }
 
-    private static HashSet<string> Read(string path, bool windows, IReadOnlyList<string> extensions, bool ignoreCase)
+    private static HashSet<string> Read(string path, bool windows, IReadOnlyList<string> extensions, bool ignoreCase, List<string> unlisted)
     {
         var names = new HashSet<string>(ignoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         foreach (string folder in path.Split(Path.PathSeparator, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
@@ -189,8 +243,10 @@ public sealed class CommandIndex
             try
             {
                 if (!Directory.Exists(folder)) continue;
+                int before = names.Count;
 
-                foreach (string file in Directory.EnumerateFiles(folder))
+                // A folder this program may not look into gives nothing, and one with an entry it may not look at goes on past it.
+                foreach (string file in Directory.EnumerateFiles(folder, "*", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }))
                 {
                     string name = Path.GetFileName(file);
                     if (!windows && !IsExecutable(file)) continue;
@@ -198,10 +254,14 @@ public sealed class CommandIndex
                     foreach (string listed in NamesFor(name, windows, extensions))
                         if (IsName(listed)) names.Add(listed);
                 }
+
+                // Android lets a program run what is in /system/bin and never list it. Nothing found is asked about by name later.
+                if (!windows && names.Count == before) unlisted.Add(folder);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
             {
                 // A folder that is not there or not readable has no commands in it, and the next is still read.
+                if (!windows) unlisted.Add(folder);
             }
         }
 

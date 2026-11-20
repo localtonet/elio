@@ -337,6 +337,25 @@ public sealed class SshTransport : ITerminalTransport
     }
 
     /// <summary>
+    /// The names of the commands on the server's path, one to a line, read over the connection already open. Empty if
+    /// the server did not answer in time or does not let commands be run.
+    /// </summary>
+    public async Task<string> ReadCommandNamesAsync(CancellationToken cancellation)
+    {
+        try
+        {
+            using SshCommand read = _chain.Last.CreateCommand(Elio.Terminal.CommandIndex.ListCommand);
+            read.CommandTimeout = TimeSpan.FromSeconds(15);
+            await read.ExecuteAsync(cancellation).ConfigureAwait(false);
+            return read.ExitStatus == 0 ? read.Result : string.Empty;
+        }
+        catch (Exception ex) when (ex is SshException or SocketException or TimeoutException or IOException or InvalidOperationException or OperationCanceledException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
     /// The last commands the user's shell on the server remembers, oldest first. Read over the connection already
     /// open, without a second login. Empty if the server keeps none where they are usually kept.
     /// </summary>
