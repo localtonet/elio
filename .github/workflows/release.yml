@@ -79,7 +79,7 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native
           path: native/out
@@ -193,7 +193,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native
           path: native/out
@@ -246,7 +246,7 @@ jobs:
       # For the scripts in build/ and the keys the programs were built to trust.
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: dist
@@ -360,7 +360,7 @@ jobs:
   #   if: ${{ !cancelled() && needs.packages.result == 'success' }}
   #   runs-on: windows-latest
   #   steps:
-  #     - uses: actions/download-artifact@v4
+  #     - uses: actions/download-artifact@v8
   #       with:
   #         name: package-manifests
   #         path: manifests
