@@ -418,6 +418,12 @@ public sealed class AppSettings : IVersionedFile
     /// <summary>How the search bar of the file lists reads what is typed into it: as part of a name or a pattern, or as a regular expression.</summary>
     public bool FileFilterWithRegex { get; set; }
 
+    /// <summary>The size of the text in the built-in file editor.</summary>
+    public double EditorFontSize { get; set; } = 13;
+
+    /// <summary>Whether the built-in file editor wraps long lines instead of scrolling sideways.</summary>
+    public bool EditorWrap { get; set; }
+
     /// <summary>Whether the file lists leave out hidden files and folders: names that start with a dot, and files marked hidden on Windows.</summary>
     public bool HideHiddenFiles { get; set; }
 
@@ -564,6 +570,7 @@ public sealed class WorkspaceFile : IVersionedFile
 [JsonSerializable(typeof(VaultContents))]
 [JsonSerializable(typeof(IdentitySecret))]
 [JsonSerializable(typeof(LocaltonetCache))]
+[JsonSerializable(typeof(FrequentFoldersFile))]
 internal sealed partial class CoreJsonContext : JsonSerializerContext;
 
 /// <summary>One saved secret, with the time it was set.</summary>

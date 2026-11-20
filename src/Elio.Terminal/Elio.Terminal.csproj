@@ -15,6 +15,9 @@
     <None Include="$(NativeOut)osx-x64\lib\libghostty-vt.dylib" Link="runtimes\osx-x64\native\libghostty-vt.dylib" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(NativeOut)osx-x64\lib\libghostty-vt.dylib')" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Elio.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Elio.Core\Elio.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
