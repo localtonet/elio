@@ -29,6 +29,10 @@ every file a name without the version in it (`elio-win-x64.zip`, `elio-osx-arm64
 `elio-android.apk` and so on). If a file is renamed in `.github/workflows/release.yml`, change it in
 `wwwroot/index.html` too. If the repository moves, search and replace its address there.
 
+The Android app is on Google Play, so the Android card and the "Google Play" button at the top link to
+`https://play.google.com/store/apps/details?id=sh.elio.app`, with the APK kept as a second choice. If the
+package name ever changes, search and replace that address in `wwwroot/index.html` and in the repository's README.
+
 Two more things to know:
 
 - `og:image` and `twitter:image` are relative (`img/social.png`) so the site works from any folder.

@@ -6,7 +6,7 @@
 
 Elio is one native app on every platform. There is no Electron and no web view inside it: the terminal is drawn straight to the GPU, starts in a fraction of a second and stays responsive while a server floods it with output. Your servers, keys and snippets follow you between devices with end-to-end encrypted sync, and computers behind a router or firewall are one click away without opening a port.
 
-Website: [elio.sh](https://elio.sh)
+Website: [elio.sh](https://elio.sh) · Android: [Elio on Google Play](https://play.google.com/store/apps/details?id=sh.elio.app)
 
 ![The Elio window: the server list on the left with groups, local shells and snippets, and one tab split into three terminals](docs/screenshots/app-dark.webp)
 
@@ -34,7 +34,7 @@ Website: [elio.sh](https://elio.sh)
 
 ## Getting started
 
-**Get Elio.** Builds for Windows, macOS, Linux and Android are on the [releases page](https://github.com/localtonet/elio/releases/latest), each with its SHA-256 in `SHA256SUMS`. There is no build for iOS there yet: it has to be built and signed with your own Apple account. To build it yourself, see [Building from source](#building-from-source).
+**Get Elio.** On Android, install it from [Google Play](https://play.google.com/store/apps/details?id=sh.elio.app); Google Play keeps it up to date. Builds for Windows, macOS, Linux and Android (an APK, for installing it yourself) are on the [releases page](https://github.com/localtonet/elio/releases/latest), each with its SHA-256 in `SHA256SUMS`. There is no build for iOS there yet: it has to be built and signed with your own Apple account. To build it yourself, see [Building from source](#building-from-source).
 
 **Or from a package manager.** Elio updates itself, so these only install it:
 
@@ -279,7 +279,7 @@ The interface is available in 30 languages: Arabic, Bengali, Chinese (Simplified
 
 ### On a phone
 
-The same app runs on Android and iOS with a layout made for a small screen: the terminal fills it, the server list slides in from the side, and a row of keys above the keyboard adds what a phone keyboard lacks: Esc, Tab, Ctrl, Alt, the arrows and the symbols a shell needs. A finger scrolls the history, and two fingers resize the text. A keyboard button in the corner brings the keyboard up or puts it away.
+The same app runs on Android ([Google Play](https://play.google.com/store/apps/details?id=sh.elio.app)) and iOS with a layout made for a small screen: the terminal fills it, the server list slides in from the side, and a row of keys above the keyboard adds what a phone keyboard lacks: Esc, Tab, Ctrl, Alt, the arrows and the symbols a shell needs. A finger scrolls the history, and two fingers resize the text. A keyboard button in the corner brings the keyboard up or puts it away.
 
 - **Files.** On a screen too narrow for two lists side by side, the file screen puts them one above the other, each with the whole width. Everything in the right-click menu is reached by pressing and holding, and the built-in editor, which is the only editor a phone has, brings up a row of the keys code needs above the keyboard.
 - **App lock.** **Lock Elio with this device's fingerprint, face or passcode** in Settings asks for it when the app is opened and when it comes back from the background. On Android a locked Elio is also kept out of screenshots and shown blank in the list of recent apps.
