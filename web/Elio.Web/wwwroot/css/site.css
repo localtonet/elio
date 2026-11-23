@@ -344,7 +344,7 @@ p code, li code {
 .fine.center { text-align: center; margin-top: 32px; }
 
 /* Download */
-.platforms { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 48px; }
+.platforms { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-top: 48px; }
 .platforms .card { display: grid; justify-items: start; align-content: start; }
 .platforms .card p { margin-bottom: 20px; }
 .platforms .button { width: 100%; }
@@ -385,7 +385,7 @@ p code, li code {
 /* Narrower screens */
 @media (max-width: 1000px) {
   .reasons { grid-template-columns: repeat(2, 1fr); }
-  .platforms { grid-template-columns: repeat(3, 1fr); }
+  .platforms { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .feature, .feature.flip, .open-grid { grid-template-columns: minmax(0, 1fr); gap: 36px; }
   .feature.flip .feature-text { order: 0; }
   .feature { padding: 48px 0; }
@@ -411,12 +411,38 @@ p code, li code {
   .security { grid-template-columns: 1fr; }
   .reasons, .security, .platforms, .open-grid { margin-top: 32px; }
   .feature:first-of-type { margin-top: 40px; }
+
+  /* The downloads become a list: a name on the left, its button on the right, the other files below.
+     Five narrow cards side by side do not fit, and two columns leave one card on its own. */
+  .platforms { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .platforms .card {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas: "icon title action" "icon desc action" "alt alt alt";
+    column-gap: 14px; align-items: center; padding: 16px;
+  }
+  .platforms .card .icon { grid-area: icon; }
+  .platforms .card h3 { grid-area: title; margin: 0; }
+  .platforms .card > p:not(.alt) { grid-area: desc; margin: 0; }
+  .platforms .card .button { grid-area: action; width: auto; min-width: 7.5rem; }
+  .platforms .card p.alt { grid-area: alt; }
+
+  /* Tap targets that a finger can hit. */
+  .copy { min-height: 32px; padding: 6px 12px; }
+  .footer-links { gap: 0; }
+  .footer-links a { padding: 9px 0; }
 }
 
 @media (max-width: 560px) {
   .reasons { grid-template-columns: 1fr; }
-  .platforms { grid-template-columns: repeat(2, 1fr); }
   .actions .button { flex: 1 1 100%; }
+
+  /* The links all fit without scrolling sideways. Download is the button beside the logo already. */
+  .site-nav { padding-inline: 10px; gap: 0; }
+  .site-nav a { padding: 8px; font-size: .875rem; }
+  .site-nav a[href$="#download"] { display: none; }
+
+  /* A command wraps instead of running off the screen. */
+  .term pre { white-space: pre-wrap; overflow-wrap: break-word; font-size: .78rem; }
   .footer-row { grid-template-columns: 1fr; gap: 28px; }
   .flow-row { flex-direction: column; }
   .wire { flex-basis: 44px; }
@@ -425,9 +451,9 @@ p code, li code {
   .files-panes { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 330px) {
-  .platforms { grid-template-columns: 1fr; }
-  .site-nav a { padding-inline: 9px; }
+@media (max-width: 340px) {
+  .site-nav a { padding-inline: 6px; }
+  .platforms .card .button { min-width: 0; padding-inline: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
