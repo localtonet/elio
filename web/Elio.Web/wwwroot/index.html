@@ -151,8 +151,10 @@
               <li>More than 200 colour themes built in; the terminal can switch between two of them as the system goes light or dark.</li>
               <li>Search through everything a terminal has printed, history included, as plain text or as a regular expression.</li>
               <li>Suggestions while you type: commands you ran before on that server appear dimmed after the cursor, and the right arrow takes them.</li>
-              <li>Pictures in the terminal: programs that speak the Kitty graphics protocol show images, plots and animations right in the output.</li>
-              <li>Take a picture of a terminal, or save a pane's output to a file.</li>
+              <li>Pictures in the terminal: programs that speak the Kitty graphics protocol or Sixel show images, plots and animations right in the output.</li>
+              <li>Links that programs mark open with Ctrl+click, and show where they go before you click.</li>
+              <li>Take a picture of a terminal, save a pane's output to a file, or record it to play back with asciinema.</li>
+              <li>Tell Elio which words to watch for, such as <code>BUILD FAILED</code>, and the tab asks for your attention when they show.</li>
               <li>A command palette, and keyboard shortcuts you can change from inside the app.</li>
             </ul>
           </div>
@@ -183,15 +185,17 @@
             <ul class="ticks">
               <li><strong>SSH</strong> with passwords, Ed25519, ECDSA and RSA keys, encrypted keys, OpenSSH certificates, the OpenSSH agent and Pageant.</li>
               <li><strong>FIDO2 security keys</strong>: log in with a key that never leaves the hardware.</li>
-              <li>Any number of <strong>jump hosts</strong>, each verified on its own, or a SOCKS5 or HTTP <strong>proxy</strong>.</li>
+              <li>Any number of <strong>jump hosts</strong>, each verified on its own, a SOCKS5 or HTTP <strong>proxy</strong>, or a command such as <code>cloudflared</code> to connect through.</li>
+              <li><strong>Passwords from 1Password or Bitwarden</strong>, fetched when you connect, and one connection shared by every terminal you open to a server.</li>
               <li>A <strong>keychain</strong> of identities: a user name with a password or a key, saved once and used on any number of servers. Generate a key and install it on your servers from the same window.</li>
               <li><strong>Group defaults</strong>: a group says what its servers connect with, and a server uses that wherever it sets nothing of its own.</li>
-              <li><strong>Import</strong> from OpenSSH config, PuTTY, an Ansible inventory, a CSV file, DigitalOcean or AWS EC2.</li>
+              <li><strong>Import</strong> from OpenSSH config, PuTTY, an Ansible inventory or a CSV file, and from AWS, Azure, Google Cloud, DigitalOcean, Hetzner, Linode, Vultr, Proxmox VE and Tailscale. Export your servers as an OpenSSH config too.</li>
               <li>Local, remote and dynamic (SOCKS5) <strong>port forwarding</strong>, <strong>agent forwarding</strong> and <strong>X11 forwarding</strong>.</li>
               <li><strong>Mosh</strong>: a shell that survives a sleeping laptop and a change of network. Elio speaks the protocol itself; the server needs <code>mosh-server</code>.</li>
               <li><strong>tmux, natively</strong>: run <code>tmux -CC</code> and its windows become Elio tabs and its panes Elio panes.</li>
               <li><strong>Local shells</strong>, found automatically, including shells that outlive the window: close Elio and they keep running for the next window to pick up.</li>
-              <li><strong>Docker containers</strong>, <strong>Telnet</strong> and <strong>serial ports</strong>.</li>
+              <li><strong>Docker containers</strong>, on this computer or on a server, <strong>Kubernetes pods</strong>, <strong>Telnet</strong> and <strong>serial ports</strong>.</li>
+              <li>Open a server from the command line, <code>elio ssh deploy@web-1</code>, or from an <code>ssh://</code> link.</li>
             </ul>
           </div>
           <div class="feature-media">
@@ -211,8 +215,8 @@
               <li>Drag a server onto a pane to open it beside what is already there, or open a whole group side by side in one tab.</li>
               <li><strong>Broadcast input</strong>: type once, reach every pane, with a clear warning while it is on.</li>
               <li>Run a command on many servers and read exit codes and output in one table.</li>
-              <li><strong>Workspaces</strong>: save the window's tabs and splits under a name, and open them again with one click.</li>
-              <li>Snippets for the commands you run often.</li>
+              <li><strong>Workspaces</strong>: save the window's tabs and splits under a name, open them again with one click, and find them on your other devices too.</li>
+              <li>Snippets for the commands you run often, in folders, for some servers only if you like, and with blanks to fill in: <code>git checkout {{branch:main}}</code>.</li>
             </ul>
             <figure class="shot">
               <picture>
@@ -245,6 +249,8 @@
               <li>Interrupted transfers continue where they stopped, and a half-written file never replaces a good one.</li>
               <li>Copy from one server straight to another.</li>
               <li>Drag and drop of files and folders, and editing a remote file in place.</li>
+              <li><strong>Compare two folders</strong> and synchronise them after a preview of what would be copied. Nothing is ever deleted.</li>
+              <li>Permissions on a folder and everything in it, and a speed limit for transfers.</li>
             </ul>
           </div>
           <div class="feature-media">
@@ -328,7 +334,7 @@
         <article class="feature flip" id="sync">
           <div class="feature-text">
             <h3><svg class="icon" aria-hidden="true"><use href="#i-sync"/></svg>Sync</h3>
-            <p class="feature-lead">Your servers, groups, snippets and known host keys on every device. Passwords too, if you choose.</p>
+            <p class="feature-lead">Your servers, groups, snippets, workspaces and known host keys on every device. Passwords too, if you choose.</p>
             <ul class="ticks">
               <li>End-to-end encrypted with a key derived from your passphrase with Argon2id. A recovery key protects you from a forgotten passphrase.</li>
               <li>No account needed: the first device starts sync with a password of your choosing.</li>
@@ -359,10 +365,11 @@
             <p class="feature-lead">Extend Elio in any language, and let your AI tools see your servers without seeing your secrets.</p>
             <ul class="ticks">
               <li>A plugin is any program that speaks a few JSON messages on its standard input and output.</li>
-              <li>It adds commands to the palette. When one runs it can type into the terminal, ask a question, show a note, copy text or open a web page.</li>
+              <li>It adds commands to the palette. When one runs it can type into the terminal, read what the last command printed, list your servers, ask a question or offer a choice, show a note, copy text or open a web page.</li>
               <li>Plugins never see passwords or keys.</li>
               <li>Elio is also a Model Context Protocol server. Point an AI tool at <code>elio --mcp</code> and it can see the servers you have saved, without ever seeing a password or a key.</li>
-              <li>If you turn it on in Settings and on the server, it can also run commands over SSH, limited to servers you have already connected to yourself.</li>
+              <li>If you turn it on in Settings and on the server, it can also run commands, read files and list folders over SSH, limited to servers you have already connected to yourself.</li>
+              <li>An <a href="https://github.com/localtonet/elio/tree/main/docs/plugin-ask-claude">example plugin</a> asks Claude what a terminal's output means, with your own API key, and only after you say yes.</li>
               <li>You see what it does: every command an AI tool runs appears in a column beside your terminals, with its exit code and what it printed.</li>
             </ul>
           </div>
@@ -481,7 +488,7 @@
             <h3>Windows</h3>
             <p>Desktop</p>
             <a class="button primary" href="https://github.com/localtonet/elio/releases/latest/download/elio-win-x64.zip">Download<span class="visually-hidden"> for Windows</span></a>
-            <p class="alt">64-bit, a zip with one program in it</p>
+            <p class="alt">x64, a zip with one program in it · <a href="https://github.com/localtonet/elio/releases/latest/download/elio-win-arm64.zip">ARM64<span class="visually-hidden"> Windows download</span></a></p>
           </li>
           <li class="card">
             <svg class="icon big" aria-hidden="true"><use href="#i-laptop"/></svg>
@@ -495,7 +502,7 @@
             <h3>Linux</h3>
             <p>Desktop</p>
             <a class="button primary" href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-x64.deb">Download<span class="visually-hidden"> the .deb package for Linux, x64</span></a>
-            <p class="alt">x64 .deb · <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-x64.tar.gz">tar.gz</a> · arm64 <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-arm64.deb">.deb</a>, <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-arm64.tar.gz">tar.gz</a></p>
+            <p class="alt">x64 .deb · <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-x64.AppImage">AppImage</a>, <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-x64.tar.gz">tar.gz</a> · arm64 <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-arm64.deb">.deb</a>, <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-arm64.AppImage">AppImage</a>, <a href="https://github.com/localtonet/elio/releases/latest/download/elio-linux-arm64.tar.gz">tar.gz</a></p>
           </li>
           <li class="card">
             <svg class="icon big" aria-hidden="true"><use href="#i-phone"/></svg>
@@ -524,7 +531,7 @@
             <li><strong>Approvers:</strong> <a href="https://github.com/orgs/localtonet/people?query=role%3Aowner">the owners of the organization</a>. Each release has to be approved by one of them before it is signed.</li>
             <li><strong>Privacy policy:</strong> <a href="privacy.html">what Elio sends over the network, and when</a>.</li>
           </ul>
-          <p class="fine">Only files built by <a href="https://github.com/localtonet/elio/blob/main/.github/workflows/release.yml">the public release workflow</a> from the source in this repository are signed. The program does not transfer any information to other networked systems unless you turn a feature on, apart from the daily check for a new version, which can be turned off in Settings.</p>
+          <p class="fine">Only files built by <a href="https://github.com/localtonet/elio/blob/main/.github/workflows/release.yml">the public release workflow</a> from the source in this repository are signed. The program does not transfer any information to other networked systems unless you turn a feature on, apart from the check for a new version, at most once every six hours, which can be turned off in Settings.</p>
         </div>
       </div>
     </section>
