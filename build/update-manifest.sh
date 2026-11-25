@@ -38,7 +38,7 @@ MANIFEST=$DIST/update.json
 printf '{"version":"%s","files":{' "$VERSION" > "$MANIFEST"
 SEPARATOR=
 COUNT=0
-for NAME in elio-win-x64.zip elio-osx-arm64.zip elio-osx-x64.zip elio-linux-x64.tar.gz elio-linux-arm64.tar.gz; do
+for NAME in elio-win-x64.zip elio-win-arm64.zip elio-osx-arm64.zip elio-osx-x64.zip elio-linux-x64.tar.gz elio-linux-arm64.tar.gz; do
     if [ ! -f "$DIST/$NAME" ]; then
         echo "Note: $NAME is not in $DIST, so copies for that system will not update themselves from this release." >&2
         continue

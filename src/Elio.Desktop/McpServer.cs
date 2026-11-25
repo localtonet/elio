@@ -28,6 +28,8 @@ internal static class McpServer
     private const string ProtocolVersion = "2025-06-18";
     private const string ListTool = "list_servers";
     private const string RunTool = "run_command";
+    private const string ReadTool = "read_file";
+    private const string ListDirectoryTool = "list_directory";
     private const int MaxOutputCharacters = 64 * 1024;
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(2);
 
@@ -37,6 +39,13 @@ internal static class McpServer
 
     public static async Task<int> RunAsync(Stream input, Stream output)
     {
+        // Nobody is here to agree to a proxy command, so only one the user already let run in Elio may run.
+        ProxyCommand.Approve = (command, _) =>
+        {
+            var vault = new Vault();
+            return Task.FromResult(vault.IsAvailable && vault.GetLocal(ProxyCommand.ApprovalName(command)) is not null);
+        };
+
         using var reader = new StreamReader(input, new UTF8Encoding(false));
         while (await reader.ReadLineAsync().ConfigureAwait(false) is string line)
         {
@@ -161,7 +170,13 @@ internal static class McpServer
         writer.WriteStartObject("properties");
         writer.WriteEndObject();
         writer.WriteEndObject();
+        WriteAnnotations(writer, readOnly: true);
         writer.WriteEndObject();
+
+        // Two read-only tools, so that an AI tool can look around without being handed a shell. They run as commands
+        // all the same, with the same permissions, limits and log as run_command, on servers with a POSIX shell.
+        WriteServerTool(writer, ReadTool, "Reads a text file on a saved server or a Localtonet device, at most the first 64 KB. Needs the same permissions as run_command, and is logged the same way.", "path", "The file's path on the server.");
+        WriteServerTool(writer, ListDirectoryTool, "Lists a folder on a saved server or a Localtonet device, with sizes, dates and permissions (ls -la). Needs the same permissions as run_command, and is logged the same way.", "path", "The folder's path on the server. Empty for the home folder.");
 
         writer.WriteStartObject();
         writer.WriteString("name", RunTool);
@@ -183,11 +198,53 @@ internal static class McpServer
         writer.WriteStringValue("command");
         writer.WriteEndArray();
         writer.WriteEndObject();
+        WriteAnnotations(writer, readOnly: false);
         writer.WriteEndObject();
 
         writer.WriteEndArray();
         writer.WriteEndObject();
     }
+
+    private static void WriteServerTool(Utf8JsonWriter writer, string name, string description, string argument, string argumentDescription)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("name", name);
+        writer.WriteString("description", description);
+        writer.WriteStartObject("inputSchema");
+        writer.WriteString("type", "object");
+        writer.WriteStartObject("properties");
+        writer.WriteStartObject("server");
+        writer.WriteString("type", "string");
+        writer.WriteString("description", "The server's name as list_servers gives it.");
+        writer.WriteEndObject();
+        writer.WriteStartObject(argument);
+        writer.WriteString("type", "string");
+        writer.WriteString("description", argumentDescription);
+        writer.WriteEndObject();
+        writer.WriteEndObject();
+        writer.WriteStartArray("required");
+        writer.WriteStringValue("server");
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        WriteAnnotations(writer, readOnly: true);
+        writer.WriteEndObject();
+    }
+
+    // Hints for the AI tool's own prompts: a read-only tool may be let through more easily than one that changes things.
+    private static void WriteAnnotations(Utf8JsonWriter writer, bool readOnly)
+    {
+        writer.WriteStartObject("annotations");
+        writer.WriteBoolean("readOnlyHint", readOnly);
+        if (!readOnly) writer.WriteBoolean("destructiveHint", true);
+        writer.WriteBoolean("openWorldHint", false);
+        writer.WriteEndObject();
+    }
+
+    /// <summary>The command read_file runs: the first 64 KB of the file, the path quoted so the shell takes it as one word.</summary>
+    internal static string ReadFileCommand(string path) => $"head -c {MaxOutputCharacters} -- {Elio.Terminal.ShellQuote.Posix(path)}";
+
+    /// <summary>The command list_directory runs, for the home folder when no path is given.</summary>
+    internal static string ListDirectoryCommand(string path) => path.Length == 0 ? "ls -la" : $"ls -la -- {Elio.Terminal.ShellQuote.Posix(path)}";
 
     private static void WriteToolResult(Utf8JsonWriter writer, string text, bool failed)
     {
@@ -205,7 +262,8 @@ internal static class McpServer
     /// <returns>What the tool said and whether it failed, or null if there is no tool by that name.</returns>
     private static async Task<(string Text, bool Failed)?> CallAsync(JsonElement parameters)
     {
-        if (parameters.ValueKind != JsonValueKind.Object || !parameters.TryGetProperty("name", out JsonElement name)) return null;
+        // A name that is not text names no tool. It must not throw: that would end the whole server over one message.
+        if (parameters.ValueKind != JsonValueKind.Object || !parameters.TryGetProperty("name", out JsonElement name) || name.ValueKind != JsonValueKind.String) return null;
 
         JsonElement arguments = parameters.TryGetProperty("arguments", out JsonElement given) && given.ValueKind == JsonValueKind.Object ? given : default;
         string Argument(string key) =>
@@ -220,6 +278,10 @@ internal static class McpServer
         {
             ListTool => (ListServers(library, devices), false),
             RunTool => await RunCommandAsync(library, devices, Argument("server"), Argument("command")).ConfigureAwait(false),
+            ReadTool => Argument("path") is { Length: > 0 } file
+                ? await RunCommandAsync(library, devices, Argument("server"), ReadFileCommand(file)).ConfigureAwait(false)
+                : ("A path is needed.", true),
+            ListDirectoryTool => await RunCommandAsync(library, devices, Argument("server"), ListDirectoryCommand(Argument("path"))).ConfigureAwait(false),
             _ => null,
         };
     }
@@ -301,8 +363,28 @@ internal static class McpServer
             string? problem = AddToPath(target, library, vault, steps, []);
             if (problem is not null) return (problem, true);
 
+            // Passwords the vault keeps as a reference to a password manager are fetched first, through the manager's own tool.
+            var fetched = new Dictionary<Guid, string>();
+            foreach (ResolvedHost step in steps)
+            {
+                List<Guid> ids = [step.Host.Id];
+                if (step.Identity is { } identity) ids.Add(identity.Id);
+                if (step.ProxyOwner is Guid owner) ids.Add(ProxySettings.SecretId(owner));
+                foreach (Guid id in ids)
+                {
+                    try
+                    {
+                        if (await PasswordManagers.ResolveStoredAsync(vault.Get(id), CancellationToken.None).ConfigureAwait(false) is string secret) fetched[id] = secret;
+                    }
+                    catch (PasswordManagerException ex)
+                    {
+                        return (ex.Message, true);
+                    }
+                }
+            }
+
             // The same resolver the app's window uses: identities, group defaults and the proxy apply here too.
-            List<SshEndpoint> path = SshEndpoints.ForPath(steps, vault.Get);
+            List<SshEndpoint> path = SshEndpoints.ForPath(steps, id => fetched.TryGetValue(id, out string? secret) ? secret : vault.Get(id));
             execute = token => SshCommandRunner.RunAsync(
                 path,
                 command,

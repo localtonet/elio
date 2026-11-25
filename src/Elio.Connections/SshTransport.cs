@@ -10,7 +10,8 @@ using Renci.SshNet.Common;
 namespace Elio.Connections;
 
 /// <summary>A proxy that makes the connection to the first server of a path on this computer's behalf.</summary>
-public sealed record SshProxy(ProxyKind Kind, string Host, int Port, string? User = null, string? Password = null)
+/// <param name="Command">For a proxy command: the command line, before its tokens are filled in.</param>
+public sealed record SshProxy(ProxyKind Kind, string Host, int Port, string? User = null, string? Password = null, string? Command = null)
 {
     // As for SshEndpoint below: the password must never be what gets printed.
     private bool PrintMembers(StringBuilder builder)
@@ -26,7 +27,8 @@ public sealed class ProxyFailedException(string message, Exception inner) : IOEx
 /// <summary>One server along the way, with what is needed to log in to it.</summary>
 /// <param name="PrivateKeyText">A private key as the text of a key file, for a key that is kept in the vault and not in a file.</param>
 /// <param name="Proxy">The proxy to reach this server through. Only looked at on the first server of a path: the others are reached through the one before them.</param>
-public sealed record SshEndpoint(string Host, int Port, string User, string? Password = null, string? PrivateKeyPath = null, string? KeyPassphrase = null, bool UseAgent = false, string? PrivateKeyText = null, SshProxy? Proxy = null)
+/// <param name="KeepAlive">How often a quiet connection sends a keep-alive. Null uses the usual interval.</param>
+public sealed record SshEndpoint(string Host, int Port, string User, string? Password = null, string? PrivateKeyPath = null, string? KeyPassphrase = null, bool UseAgent = false, string? PrivateKeyText = null, SshProxy? Proxy = null, TimeSpan? KeepAlive = null)
 {
     // What a record prints by default is every member, and this one travels on exceptions, which end up in logs
     // and messages. So only what says which server it is gets printed, and never the password or passphrase.
@@ -69,6 +71,9 @@ internal sealed class SshChain : IDisposable
 
     private readonly List<BaseClient> _clients = [];
 
+    // A proxy command that carries the first connection, ended with the chain.
+    private ProxyCommandBridge? _bridge;
+
     public SshClient Last => (SshClient)_clients[^1];
 
     /// <summary>The last server's file client, when the chain was opened for files.</summary>
@@ -98,9 +103,26 @@ internal sealed class SshChain : IDisposable
 
                 // Only the first server is reached from this computer, so it is the only one a proxy can stand in front of.
                 SshProxy? proxy = i == 0 ? path[0].Proxy : null;
+
+                // A proxy command is reached on a port of this computer's own, and SSH.NET is told nothing of a proxy.
+                if (proxy is { Kind: ProxyKind.Command, Command: { Length: > 0 } command })
+                {
+                    chain._bridge = await ProxyCommand.StartAsync(command, host, port, path[i].User, cancellation).ConfigureAwait(false);
+                    (host, port, proxy) = ("127.0.0.1", chain._bridge.Port, null);
+                }
+
                 ConnectionInfo info = InfoFor(host, port, path[i], proxy);
                 if (timeout is TimeSpan limit) info.Timeout = limit;
-                await chain.ConnectHopAsync(path[i], last ? createLast(info) : new SshClient(info), policy, proxy, cancellation).ConfigureAwait(false);
+                try
+                {
+                    await chain.ConnectHopAsync(path[i], last ? createLast(info) : new SshClient(info), policy, proxy, cancellation).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (i == 0 && chain._bridge is { } bridge && ex is SshConnectionException or SshOperationTimeoutException or SocketException)
+                {
+                    // What the command said on its way out explains more than the connection that went nowhere.
+                    string said = bridge.ErrorOutput;
+                    throw new ProxyFailedException(said.Length > 0 ? L.T("The command to connect through ended: {0}", said) : L.T("The command to connect through did not make the connection."), ex);
+                }
                 if (last) break;
 
                 // The next server is reached through a private local port on this one, and proves who it is as usual.
@@ -143,7 +165,7 @@ internal sealed class SshChain : IDisposable
 
     private async Task ConnectHopAsync(SshEndpoint endpoint, BaseClient client, HostKeyPolicy policy, SshProxy? proxy, CancellationToken cancellation)
     {
-        client.KeepAliveInterval = KeepAlive;
+        client.KeepAliveInterval = endpoint.KeepAlive ?? KeepAlive;
         _clients.Add(client);
 
         HostKeyInfo? rejected = null;
@@ -252,6 +274,8 @@ internal sealed class SshChain : IDisposable
                 // The connection was already gone.
             }
         }
+
+        _bridge?.Dispose();
     }
 }
 
@@ -261,14 +285,17 @@ public sealed class SshTransport : ITerminalTransport
     private const int ShellBufferSize = 64 * 1024;
 
     private readonly SshChain _chain;
+
+    // What closing this terminal lets go of: the whole connection, or its hold on a shared one.
+    private readonly IDisposable _release;
     private readonly ShellStream _shell;
     private readonly List<string> _forwardProblems = [];
     private int _openForwards;
     private volatile bool _lost;
 
-    private SshTransport(SshChain chain, ShellStream shell)
+    private SshTransport(SshChain chain, IDisposable release, ShellStream shell)
     {
-        (_chain, _shell) = (chain, shell);
+        (_chain, _release, _shell) = (chain, release, shell);
         chain.Last.ErrorOccurred += OnConnectionError;
         shell.ErrorOccurred += OnConnectionError;
     }
@@ -306,11 +333,16 @@ public sealed class SshTransport : ITerminalTransport
     /// <summary>Opens a shell at the end of a path whose earlier servers are jump hosts.</summary>
     public static async Task<SshTransport> ConnectAsync(IReadOnlyList<SshEndpoint> path, int columns, int rows, HostKeyPolicy policy, IReadOnlyList<PortForward>? forwards, SshShellOptions? options, CancellationToken cancellation)
     {
-        SshChain chain = await SshChain.OpenAsync(path, policy, cancellation).ConfigureAwait(false);
+        // X11 forwarding checks a cookie of each terminal's own, which one shared connection cannot hold for several.
+        bool share = options is { ShareConnection: true, ForwardX11: false };
+        SshConnectionPool.Lease? lease = share ? await SshConnectionPool.AcquireAsync(path, policy, cancellation).ConfigureAwait(false) : null;
+        SshChain chain = lease?.Chain ?? await SshChain.OpenAsync(path, policy, cancellation).ConfigureAwait(false);
+        IDisposable release = lease ?? (IDisposable)chain;
         try
         {
             SshClient client = chain.Last;
             var requests = new ShellRequests { AgentForwarding = options?.ForwardAgent == true };
+            foreach ((string name, string value) in options?.Environment ?? new Dictionary<string, string>()) requests.Environment[name] = value;
 
             // The agent is only ever reached through channels the server opens after this session asked for them.
             if (requests.AgentForwarding) client.AcceptChannels(ShellRequests.AgentChannel, AgentRelay.Serve);
@@ -323,15 +355,18 @@ public sealed class SshTransport : ITerminalTransport
                 client.AcceptChannels(ShellRequests.X11Channel, channel => X11Relay.Serve(channel, display, cookie));
             }
 
-            var transport = new SshTransport(chain, client.CreateShellStream("xterm-256color", (uint)columns, (uint)rows, 0, 0, ShellBufferSize, requests));
+            var transport = new SshTransport(chain, release, client.CreateShellStream("xterm-256color", (uint)columns, (uint)rows, 0, 0, ShellBufferSize, requests));
             if (requests.AgentForwarding && !requests.AgentForwardingAccepted) transport._forwardProblems.Add(L.T("The server refused to forward the SSH agent."));
             if (requests.X11Cookie is not null && !requests.X11Accepted) transport._forwardProblems.Add(L.T("The server refused to forward X11."));
-            foreach (PortForward forward in forwards ?? []) transport.StartForward(forward);
+            // On a shared connection the forwards belong to the connection, set up by the terminal that opened it.
+            if (lease is { Opened: false } && forwards is { Count: > 0 }) transport._forwardProblems.Add(L.T("The port forwards are kept by the first terminal of this shared connection."));
+            else foreach (PortForward forward in forwards ?? []) transport.StartForward(forward);
             return transport;
         }
         catch
         {
-            chain.Dispose();
+            // Only this terminal's hold goes: other terminals may be using a shared connection.
+            release.Dispose();
             throw;
         }
     }
@@ -412,8 +447,10 @@ public sealed class SshTransport : ITerminalTransport
 
     public ValueTask DisposeAsync()
     {
+        // A shared connection lives on after this terminal, and must not call back into it.
+        _chain.Last.ErrorOccurred -= OnConnectionError;
         _shell.Dispose();
-        _chain.Dispose();
+        _release.Dispose();
         return ValueTask.CompletedTask;
     }
 }

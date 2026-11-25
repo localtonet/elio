@@ -142,6 +142,15 @@ public sealed partial class DialogHost
         return Frame(title, Paragraph(message), ok);
     });
 
+    /// <summary>Shows a longer text, such as an answer a plugin brings back, in a box that scrolls and can be copied from.</summary>
+    public Task ShowTextAsync(string title, string text) => Enqueue(false, result =>
+    {
+        var box = new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = ElioColors.Text, LineHeight = 19, Tag = "long-text" };
+        Button ok = MakeButton(L.T("OK"), primary: true);
+        ok.Click += (_, _) => result.TrySetResult(true);
+        return Frame(title, new ScrollViewer { MaxHeight = 420, Margin = ScrollOutset, Content = new Border { Margin = ScrollInset, Child = box } }, ok);
+    });
+
     /// <summary>
     /// Shows a shared terminal's link and its password, each with a button that copies that one alone: the two
     /// are meant to reach the other person by different ways, so they are never copied together.
@@ -195,27 +204,96 @@ public sealed partial class DialogHost
     });
 
     /// <returns>The snippet as edited, or null if cancelled.</returns>
-    public Task<Snippet?> EditSnippetAsync(Snippet? existing) => Enqueue<Snippet?>(null, result =>
+    /// <param name="folders">The folders other snippets are in, offered for this one.</param>
+    public Task<Snippet?> EditSnippetAsync(Snippet? existing, IReadOnlyList<string> folders) => Enqueue<Snippet?>(null, result =>
     {
         TextBox name = Input(existing?.Name, tag: "snippet-name");
+        var folder = new AutoCompleteBox
+        {
+            Text = existing?.Folder,
+            ItemsSource = folders,
+            FilterMode = AutoCompleteFilterMode.ContainsOrdinal,
+            MinimumPrefixLength = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            PlaceholderText = L.T("None"),
+            Tag = "snippet-folder",
+        };
         TextBox command = MultiLine(existing?.Command, "snippet-command");
+        HostLibrary library = AppServices.Library;
+        TextBox scope = Input(existing is null ? null : string.Join(", ", SnippetScope.Names(existing, library)), tag: "snippet-for");
+        scope.PlaceholderText = L.T("Every terminal");
+        var error = new TextBlock { Foreground = ElioColors.Danger, IsVisible = false, TextWrapping = TextWrapping.Wrap };
         Button save = MakeButton(L.T("Save"), primary: true);
         Button cancel = MakeButton(L.T("Cancel"), primary: false);
 
         save.Click += (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(command.Text)) return;
+
+            (List<Guid> ids, List<string> unknown) = SnippetScope.Parse(scope.Text, library);
+            if (unknown.Count > 0)
+            {
+                error.Text = L.T("No server or group is called {0}.", string.Join(", ", unknown));
+                error.IsVisible = true;
+                return;
+            }
+
             string body = command.Text.Trim();
-            result.TrySetResult(new Snippet { Id = existing?.Id ?? Guid.NewGuid(), Name = string.IsNullOrWhiteSpace(name.Text) ? body.Split('\n')[0].Trim() : name.Text.Trim(), Command = body });
+            result.TrySetResult(new Snippet
+            {
+                Id = existing?.Id ?? Guid.NewGuid(),
+                Name = string.IsNullOrWhiteSpace(name.Text) ? body.Split('\n')[0].Trim() : name.Text.Trim(),
+                Command = body,
+                Folder = string.IsNullOrWhiteSpace(folder.Text) ? null : folder.Text.Trim(),
+                For = ids,
+            });
         };
         cancel.Click += (_, _) => result.TrySetResult(null);
         FocusWhenShown(name);
 
+        var hint = new TextBlock
+        {
+            Text = L.T("Write {{name}} for a blank to fill in each time it is used, or {{name:value}} to have a value there already. For example: git checkout {{branch:main}}"),
+            FontSize = 12,
+            Foreground = ElioColors.TextMuted,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
         return Frame(
             existing is null ? L.T("Add command") : L.T("Edit command"),
-            new StackPanel { Spacing = 12, Children = { Field(L.T("Name"), name), Field(L.T("Command (each line is typed in order)"), command) } },
+            new StackPanel { Spacing = 12, Children = { Field(L.T("Name"), name), Field(L.T("Folder"), folder), Field(L.T("Command (each line is typed in order)"), command), hint, Field(L.T("Only for these servers or groups (by name, separated by commas)"), scope), error } },
             cancel,
             save);
+    });
+
+    /// <summary>Asks for the blanks of a snippet. Returns the value for each name, or null if the user backed out.</summary>
+    public Task<Dictionary<string, string>?> FillBlanksAsync(string title, IReadOnlyList<SnippetBlank> blanks) => Enqueue<Dictionary<string, string>?>(null, result =>
+    {
+        var boxes = blanks.Select(blank => (blank.Name, Box: Input(blank.Default, tag: "blank-" + blank.Name))).ToList();
+        Button type = MakeButton(L.T("Type it"), primary: true);
+        Button cancel = MakeButton(L.T("Cancel"), primary: false);
+
+        void Done() => result.TrySetResult(boxes.ToDictionary(b => b.Name, b => b.Box.Text ?? string.Empty, StringComparer.Ordinal));
+
+        type.Click += (_, _) => Done();
+        cancel.Click += (_, _) => result.TrySetResult(null);
+
+        // Enter in any of the boxes is the same as the button, so one blank is filled and typed without the mouse.
+        foreach ((_, TextBox box) in boxes)
+        {
+            box.KeyDown += (_, e) =>
+            {
+                if (e.Key != Avalonia.Input.Key.Enter) return;
+                e.Handled = true;
+                Done();
+            };
+        }
+
+        if (boxes.Count > 0) FocusWhenShown(boxes[0].Box);
+
+        var fields = new StackPanel { Spacing = 12 };
+        foreach ((string blankName, TextBox box) in boxes) fields.Children.Add(Field(blankName, box));
+        return Frame(title, fields, cancel, type);
     });
 
     /// <summary>Runs one command on the chosen servers at once and shows what happened on each.</summary>

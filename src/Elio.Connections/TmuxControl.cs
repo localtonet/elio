@@ -117,6 +117,17 @@ public sealed class TmuxSession
 
     // Everything below is touched only by the thread that feeds the stream in.
     private readonly ArrayBufferWriter<byte> _line = new(4096);
+
+    // A control-mode line is one notification or one row of a pane; even escaped, it is far shorter than this. One
+    // that goes on longer is dropped up to its end, so output without a line break cannot fill the app's memory.
+    private const int LongestLine = 1024 * 1024;
+
+    // The most a reply may hold, all its lines together, for the same reason.
+    private const long LargestReply = 64L * 1024 * 1024;
+
+    // Set while the rest of a line that grew too long is being skipped.
+    private bool _overlong;
+    private long _blockBytes;
     private bool _escapeSeen;
     private bool _inBlock;
     private string _blockNumber = string.Empty;
@@ -405,9 +416,9 @@ public sealed class TmuxSession
                     return i + 1;
                 }
 
-                _line.Write("\u001b"u8);
+                Append("\u001b"u8);
             }
-            else if (_line.WrittenCount == 0 && !_inBlock && data[i] == 0x1b)
+            else if (_line.WrittenCount == 0 && !_overlong && !_inBlock && data[i] == 0x1b)
             {
                 // ESC \ ends control mode. Inside a reply an ESC is just pane content (colours from
                 // capture-pane), and notifications never carry a raw one, so only this spot can mean the end.
@@ -419,21 +430,35 @@ public sealed class TmuxSession
             int end = data[i..].IndexOf((byte)'\n');
             if (end < 0)
             {
-                _line.Write(data[i..]);
+                Append(data[i..]);
                 break;
             }
 
-            _line.Write(data.Slice(i, end));
+            Append(data.Slice(i, end));
             i += end + 1;
 
             // A pty in between may have turned the line ends into CR LF.
             ReadOnlySpan<byte> line = _line.WrittenSpan;
             if (line.Length > 0 && line[^1] == (byte)'\r') line = line[..^1];
-            HandleLine(line);
+            if (!_overlong) HandleLine(line);
             _line.ResetWrittenCount();
+            _overlong = false;
         }
 
         return data.Length;
+    }
+
+    private void Append(ReadOnlySpan<byte> part)
+    {
+        if (_overlong) return;
+        if (_line.WrittenCount + part.Length > LongestLine)
+        {
+            _overlong = true;
+            _line.ResetWrittenCount();
+            return;
+        }
+
+        _line.Write(part);
     }
 
     private void HandleLine(ReadOnlySpan<byte> line)
@@ -446,7 +471,7 @@ public sealed class TmuxSession
                 _inBlock = false;
                 Pending? pending = _current;
                 var reply = new TmuxReply(ok, _blockLines ?? []);
-                (_current, _blockLines) = (null, null);
+                (_current, _blockLines, _blockBytes) = (null, null, 0);
                 if (pending is not null)
                 {
                     pending.OnReply?.Invoke(reply);
@@ -465,7 +490,13 @@ public sealed class TmuxSession
                 return;
             }
 
-            _blockLines?.Add(line.ToArray());
+            // Past the limit the lines are no longer kept; the reply still ends, shorter, when tmux says so.
+            if (_blockLines is not null && _blockBytes + line.Length <= LargestReply)
+            {
+                _blockLines.Add(line.ToArray());
+                _blockBytes += line.Length;
+            }
+
             return;
         }
 
@@ -511,6 +542,7 @@ public sealed class TmuxSession
                 }
 
                 _blockLines = _current is null && _greeted ? null : [];
+                _blockBytes = 0;
                 break;
 
             case "%window-add":

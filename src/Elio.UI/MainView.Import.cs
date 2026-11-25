@@ -11,11 +11,15 @@ namespace Elio.UI;
 public partial class MainView
 {
     // Names of products, the same in every language. They are what someone types into the palette to find the import.
-    private const string ImportSources = "OpenSSH · PuTTY · Ansible · CSV · DigitalOcean · AWS";
+    private const string ImportSources = "OpenSSH · PuTTY · Ansible · CSV · DigitalOcean · AWS · Azure · Google Cloud · Hetzner · Linode · Vultr · Tailscale · Proxmox";
 
     // Where the vault keeps cloud credentials, for those who asked it to. They are this device's own and never synced.
     private const string DigitalOceanVaultName = "import.digitalocean";
     private const string AwsVaultName = "import.aws";
+    private const string HetznerVaultName = "import.hetzner";
+    private const string LinodeVaultName = "import.linode";
+    private const string VultrVaultName = "import.vultr";
+    private const string TailscaleVaultName = "import.tailscale";
 
     // An inventory or a table of servers is a few kilobytes. Something far larger was picked by mistake.
     private const long LargestImportFile = 8 * 1024 * 1024;
@@ -32,6 +36,16 @@ public partial class MainView
         items.Add(new(L.T("Import a CSV or TSV file"), L.T("Columns: name, host, port, user, group, tags"), () => _ = ImportTextFileAsync(L.T("Import a CSV or TSV file"), (text, _) => HostImport.FromCsv(text))));
         items.Add(new(L.T("Import droplets from DigitalOcean"), L.T("With an API token"), () => _ = ImportFromDigitalOceanAsync()));
         items.Add(new(L.T("Import instances from AWS EC2"), L.T("With an access key"), () => _ = ImportFromAwsAsync()));
+        if (CanRunCloudTools)
+        {
+            items.Add(new(L.T("Import virtual machines from Azure"), L.T("With the Azure CLI you are signed in to (az)"), () => _ = ImportFromAzureAsync()));
+            items.Add(new(L.T("Import instances from Google Cloud"), L.T("With the gcloud CLI you are signed in to"), () => _ = ImportFromGoogleCloudAsync()));
+        }
+        items.Add(new(L.T("Import servers from Hetzner Cloud"), L.T("With an API token"), () => _ = ImportFromHetznerAsync()));
+        items.Add(new(L.T("Import instances from Linode"), L.T("With an API token"), () => _ = ImportFromLinodeAsync()));
+        items.Add(new(L.T("Import instances from Vultr"), L.T("With an API key"), () => _ = ImportFromVultrAsync()));
+        items.Add(new(L.T("Import devices from Tailscale"), L.T("With an API access token"), () => _ = ImportFromTailscaleAsync()));
+        items.Add(new(L.T("Import virtual machines and containers from Proxmox VE"), L.T("With an API token"), () => _ = ImportFromProxmoxAsync()));
         items.Add(new(L.T("Import servers from a file"), "Elio", () => _ = ImportServersAsync()));
 
         if (await Dialogs.ChooseAsync(items, L.T("Where to import servers from")) is PaletteItem chosen) chosen.Run();
@@ -66,22 +80,42 @@ public partial class MainView
         await Dialogs.ShowMessageAsync(title, note);
     }
 
-    private async Task ImportFromDigitalOceanAsync()
+    private Task ImportFromDigitalOceanAsync() =>
+        ImportWithTokenAsync(DigitalOceanImport.GroupName, DigitalOceanVaultName, TokenNote(DigitalOceanImport.GroupName), L.T("API token"), null, DigitalOceanImport.ListAsync);
+
+    private Task ImportFromHetznerAsync() =>
+        ImportWithTokenAsync(HetznerImport.GroupName, HetznerVaultName, TokenNote(HetznerImport.GroupName), L.T("API token"), null, HetznerImport.ListAsync);
+
+    private Task ImportFromLinodeAsync() =>
+        ImportWithTokenAsync(LinodeImport.GroupName, LinodeVaultName, TokenNote(LinodeImport.GroupName), L.T("API token"), null, LinodeImport.ListAsync);
+
+    // Vultr calls its token an API key.
+    private Task ImportFromVultrAsync() =>
+        ImportWithTokenAsync(VultrImport.GroupName, VultrVaultName, TokenNote(VultrImport.GroupName), L.T("API key"), null, VultrImport.ListAsync);
+
+    private Task ImportFromTailscaleAsync() =>
+        ImportWithTokenAsync(TailscaleImport.GroupName, TailscaleVaultName, TokenNote(TailscaleImport.GroupName), L.T("API access token"), "tskey-api-…", TailscaleImport.ListAsync);
+
+    private static string TokenNote(string provider) =>
+        L.T("An API token that may read is enough. It is sent to {0} and nowhere else, and is only kept if you tick the box.", provider);
+
+    /// <summary>Asks for the one secret a provider lists its servers with, and imports what it lists.</summary>
+    /// <param name="list">The provider's ListAsync. It is given the secret, no handler (that is for tests), and a way to stop.</param>
+    private async Task ImportWithTokenAsync(string title, string vaultName, string note, string label, string? placeholder, Func<string, HttpMessageHandler?, CancellationToken, Task<HostLibrary>> list)
     {
-        const string Title = "DigitalOcean";
         Vault vault = AppServices.Vault;
-        string? saved = vault.IsAvailable ? vault.GetLocal(DigitalOceanVaultName) : null;
+        string? saved = vault.IsAvailable ? vault.GetLocal(vaultName) : null;
 
         CredentialAnswer? answer = await Dialogs.AskCredentialsAsync(
-            Title,
-            L.T("An API token that may read is enough. It is sent to {0} and nowhere else, and is only kept if you tick the box.", Title),
-            [new CredentialField(L.T("API token"), Secret: true, saved)],
+            title,
+            note,
+            [new CredentialField(label, Secret: true, saved, Placeholder: placeholder)],
             vault.IsAvailable,
             remembered: saved is not null);
         if (answer is null) return;
 
         string token = answer.Values[0];
-        await RunCloudImportAsync(Title, DigitalOceanVaultName, answer.Remember ? token : null, saved, cancellation => DigitalOceanImport.ListAsync(token, null, cancellation));
+        await RunCloudImportAsync(title, vaultName, answer.Remember ? token : null, saved, cancellation => list(token, null, cancellation));
     }
 
     private async Task ImportFromAwsAsync()

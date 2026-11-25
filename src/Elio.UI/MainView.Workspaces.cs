@@ -44,7 +44,7 @@ public partial class MainView
 
         if (same is null) SavedWorkspaces.Add(same = new SavedWorkspace { Name = name });
         same.Tabs = tabs;
-        same.SavedUtc = DateTime.UtcNow;
+        same.SavedUtc = same.ModifiedUtc = DateTime.UtcNow;
         AppServices.SaveWorkspaces();
     }
 
@@ -73,6 +73,7 @@ public partial class MainView
         if (await Dialogs.AskTextAsync(L.T("Rename workspace…"), L.T("Workspace name"), workspace.Name, L.T("Save")) is not string name) return;
 
         workspace.Name = name;
+        workspace.ModifiedUtc = DateTime.UtcNow;
         AppServices.SaveWorkspaces();
     }
 
@@ -82,6 +83,7 @@ public partial class MainView
         if (!await Dialogs.ConfirmAsync(L.T("Delete workspace…"), L.T("\"{0}\" will be deleted.", workspace.Name), L.T("Delete"), danger: true)) return;
 
         SavedWorkspaces.Remove(workspace);
+        AppServices.Workspaces.Deleted[workspace.Id] = DateTime.UtcNow;
         AppServices.SaveWorkspaces();
     }
 

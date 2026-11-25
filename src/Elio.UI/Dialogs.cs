@@ -201,7 +201,12 @@ public sealed partial class DialogHost : Panel
 
     private static CheckBox Check(string text, bool value, string tag) => new() { Content = text, IsChecked = value, Foreground = ElioColors.Text, Tag = tag };
 
-    private static StackPanel Field(string label, Control input) => new() { Children = { Label(label), input } };
+    private static StackPanel Field(string label, Control input)
+    {
+        // A screen reader reads the box by the label written above it, which it cannot tell belongs to it.
+        if (Avalonia.Automation.AutomationProperties.GetName(input) is null) Avalonia.Automation.AutomationProperties.SetName(input, label);
+        return new() { Children = { Label(label), input } };
+    }
 
     /// <summary>
     /// The box that lets AI tools run commands on one server is one of two switches, and the other one is in Settings.
@@ -434,11 +439,19 @@ public sealed partial class DialogHost : Panel
         CheckBox forwardX11 = Check(L.T("Show the server's graphical programs here (X11 forwarding)"), existing?.ForwardX11 == true, "forward-x11");
         var mosh = new InheritableCheck(L.T("Use Mosh, which survives sleep and changing networks (the server needs mosh-server)"), existing?.UseMosh == true, "mosh");
         CheckBox reconnect = Check(L.T("Reconnect automatically if the connection drops"),existing?.AutoReconnect ?? true, "reconnect");
+        CheckBox logOutput = Check(L.T("Save the output of every session with this server to a file"), existing?.LogOutput == true, "log-output");
+        CheckBox recordSessions = Check(L.T("Record every session with this server (asciinema)"), existing?.RecordSessions == true, "record-sessions");
+        CheckBox shareConnection = Check(L.T("Open more terminals to this server over the connection already open (no second login; not with X11 forwarding)"), existing?.ShareConnection == true, "share-connection");
+        TextBox keepAlive = Input(existing is { KeepAliveSeconds: > 0 } ? existing.KeepAliveSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture) : null, tag: "keep-alive");
+        keepAlive.PlaceholderText = "20";
         string jumpNames = existing is null ? string.Empty : string.Join(", ", existing.JumpHosts.Select(id => allHosts.FirstOrDefault(h => h.Id == id)?.Name).OfType<string>());
         TextBox jumps = Input(jumpNames, tag: "jumps");
         TextBox forwards = MultiLine(existing is null ? null : string.Join('\n', existing.Forwards), "forwards");
         TextBox script = MultiLine(existing?.LoginScript, "script");
         TextBox remote = Input(existing?.RemoteCommand, tag: "remote");
+
+        // The same variables as a local profile's, asked of the server instead. They are kept in one place on the server entry.
+        TextBox sshVariables = MultiLine(existing is null || existing.Kind != HostKind.Ssh ? null : string.Join('\n', existing.Environment.Select(v => $"{v.Key}={v.Value}")), "ssh-environment");
 
         Control jumpsField = Field(L.T("Jump hosts (in order, by saved name, separated by commas)"), jumps);
         Control forwardsField = Field(L.T("Port forwards (one per line: L 8080:localhost:80, R 9000:localhost:3000, D 1080)"), forwards);
@@ -446,7 +459,7 @@ public sealed partial class DialogHost : Panel
         var advanced = new StackPanel
         {
             Spacing = 12,
-            IsVisible = existing is not null && (existing.UseAgent || existing.ForwardAgent || existing.AllowMcpCommands || existing.ForwardX11 || existing.UseMosh || !existing.AutoReconnect || existing.JumpHosts.Count > 0 || existing.Forwards.Count > 0 || existing.LoginScript is not null || existing.RemoteCommand is not null || existing.Proxy is not null),
+            IsVisible = existing is not null && (existing.UseAgent || existing.ForwardAgent || existing.AllowMcpCommands || existing.ForwardX11 || existing.UseMosh || !existing.AutoReconnect || existing.JumpHosts.Count > 0 || existing.Forwards.Count > 0 || existing.LoginScript is not null || existing.RemoteCommand is not null || existing.Proxy is not null || (existing.Kind == HostKind.Ssh && existing.Environment.Count > 0) || existing.LogOutput || existing.RecordSessions || existing.KeepAliveSeconds > 0 || existing.ShareConnection),
             Children =
             {
                 agent.Box,
@@ -454,6 +467,10 @@ public sealed partial class DialogHost : Panel
                 forwardX11,
                 mosh.Box,
                 reconnect,
+                logOutput,
+                recordSessions,
+                shareConnection,
+                Field(L.T("Seconds between keep-alives on a quiet connection (empty for 20)"), keepAlive),
                 mcpCommands,
                 mcpNote,
                 jumpsField,
@@ -461,6 +478,7 @@ public sealed partial class DialogHost : Panel
                 forwardsField,
                 Field(L.T("Login script (typed line by line after connecting)"), script),
                 remoteField,
+                Field(L.T("Environment variables to send (one per line: NAME=value; the server's AcceptEnv decides which it takes)"), sshVariables),
             },
         };
         var toggleAdvanced = new Button { Content = L.T("Advanced"), Padding = new Thickness(12, 4), HorizontalAlignment = HorizontalAlignment.Left, Tag = "advanced" };
@@ -531,12 +549,18 @@ public sealed partial class DialogHost : Panel
             }
 
             var environment = new Dictionary<string, string>();
-            foreach (string variable in chosen == HostKind.Local ? (variables.Text ?? string.Empty).Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) : [])
+            string variableText = chosen switch
+            {
+                HostKind.Local => variables.Text ?? string.Empty,
+                HostKind.Ssh => sshVariables.Text ?? string.Empty,
+                _ => string.Empty,
+            };
+            foreach (string variable in variableText.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
                 int equals = variable.IndexOf('=');
                 if (equals < 1)
                 {
-                    Fail(L.T("This is not a variable: {0}", variable), inAdvanced: false);
+                    Fail(L.T("This is not a variable: {0}", variable), inAdvanced: chosen == HostKind.Ssh);
                     return;
                 }
 
@@ -598,6 +622,10 @@ public sealed partial class DialogHost : Panel
                 Serial = serialSettings,
                 Directory = chosen != HostKind.Local || string.IsNullOrWhiteSpace(folder.Text) ? null : folder.Text.Trim(),
                 Environment = environment,
+                LogOutput = logOutput.IsChecked == true,
+                RecordSessions = recordSessions.IsChecked == true,
+                ShareConnection = ssh && shareConnection.IsChecked == true,
+                KeepAliveSeconds = ssh && int.TryParse(keepAlive.Text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int seconds) ? Math.Clamp(seconds, 0, 3600) : 0,
             };
             proxy.Store(entry.Id, through);
             result.TrySetResult(entry);
@@ -661,7 +689,12 @@ public sealed partial class DialogHost : Panel
             agent.ShowInherited(fromGroup.AgentFrom);
             mosh.ShowInherited(fromGroup.MoshFrom);
             proxy.SetInherited(fromGroup.Proxy is { } inheritedProxy
-                ? FromGroup($"{(inheritedProxy.Kind == ProxyKind.Http ? "HTTP CONNECT" : "SOCKS5")} {inheritedProxy.Host}:{inheritedProxy.Port}", fromGroup.ProxyFrom)
+                ? FromGroup(inheritedProxy.Kind switch
+                {
+                    ProxyKind.Command => inheritedProxy.Command ?? string.Empty,
+                    ProxyKind.Http => $"HTTP CONNECT {inheritedProxy.Host}:{inheritedProxy.Port}",
+                    _ => $"SOCKS5 {inheritedProxy.Host}:{inheritedProxy.Port}",
+                }, fromGroup.ProxyFrom)
                 : null);
 
             showingInherited = false;
@@ -780,9 +813,16 @@ public sealed partial class DialogHost : Panel
         CheckBox lockApp = Check(L.T("Lock Elio with this device's fingerprint, face or passcode"), settings.LockApp, "lock-app");
         lockApp.IsVisible = AppServices.Authenticate is not null;
         CheckBox mcp = Check(L.T("Let AI tools connected with \"elio --mcp\" run commands on your servers"), settings.McpRunCommands, "mcp");
+
+        // Asked of the operating system each time, since another program may have taken the links over since.
+        ILinkRegistration? links = AppServices.Links;
+        bool linksWereOurs = links?.IsRegistered == true;
+        CheckBox openLinks = Check(L.T("Open ssh:// and elio:// links with Elio"), linksWereOurs, "open-links");
+        openLinks.IsVisible = links is not null;
         TextBox summon = Input(settings.SummonKey, tag: "summon");
         CheckBox fromTop = Check(L.T("Drop the window down from the top of the screen"), settings.SummonFromTop, "summon-top");
         TextBox highlights = MultiLine(string.Join('\n', settings.Highlights.Select(FormatHighlight)), "highlights");
+        TextBox triggers = MultiLine(string.Join('\n', settings.Triggers), "triggers");
         Button save = MakeButton(L.T("Save"), primary: true);
         Button cancel = MakeButton(L.T("Cancel"), primary: false);
 
@@ -812,12 +852,14 @@ public sealed partial class DialogHost : Panel
             settings.CheckForUpdates = updates.IsChecked == true;
             if (helloOffered && (hello.IsChecked == true) != vault.HelloEnabled) _ = ChangeHelloAsync(vault, hello.IsChecked == true);
             if (lockApp.IsVisible && (lockApp.IsChecked == true) != settings.LockApp) _ = ChangeLockAsync(lockApp.IsChecked == true);
+            if (links is not null && (openLinks.IsChecked == true) != linksWereOurs) _ = ChangeLinksAsync(links, openLinks.IsChecked == true);
             settings.Highlights = (highlights.Text ?? string.Empty).Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(ParseHighlight).ToList();
+            settings.Triggers = (triggers.Text ?? string.Empty).Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
             result.TrySetResult(true);
         };
         cancel.Click += (_, _) => result.TrySetResult(false);
 
-        return Frame(L.T("Settings"), new ScrollViewer { MaxHeight = 520, Margin = ScrollOutset, Content = new StackPanel { Margin = ScrollInset, Spacing = 12, Children = { new TextBlock { Text = L.T("Elio {0}", UpdateCheck.RunningText), FontSize = 12, Foreground = ElioColors.TextMuted, Tag = "version" }, Field(L.T("Language (applies after a restart)"), language), Field(L.T("Theme"), theme), followSystem, Field(L.T("Theme while the system is light"), lightTheme), Field(L.T("Font size"), size), light, ligatures, restore, updates, copy, paste, groupTabs, keepShells, suggestions, seedSuggestions, highlightCommands, highlightUnknown, hello, lockApp, Field(L.T("Editor for remote files (empty for the system's)"), editor), Field(L.T("Server that passes shared terminals along (empty uses the sync server)"), shareServer), Field(L.T("Key that shows or hides the window from anywhere (for example Ctrl+Oem3, applies after a restart)"), summon), fromTop, mcp, Field(L.T("Text to highlight (one per line: #ff5555 error)"), highlights) } } }, cancel, save);
+        return Frame(L.T("Settings"), new ScrollViewer { MaxHeight = 520, Margin = ScrollOutset, Content = new StackPanel { Margin = ScrollInset, Spacing = 12, Children = { new TextBlock { Text = L.T("Elio {0}", UpdateCheck.RunningText), FontSize = 12, Foreground = ElioColors.TextMuted, Tag = "version" }, Field(L.T("Language (applies after a restart)"), language), Field(L.T("Theme"), theme), followSystem, Field(L.T("Theme while the system is light"), lightTheme), Field(L.T("Font size"), size), light, ligatures, restore, updates, copy, paste, groupTabs, keepShells, suggestions, seedSuggestions, highlightCommands, highlightUnknown, hello, lockApp, openLinks, Field(L.T("Editor for remote files (empty for the system's)"), editor), Field(L.T("Server that passes shared terminals along (empty uses the sync server)"), shareServer), Field(L.T("Key that shows or hides the window from anywhere (for example Ctrl+Oem3, applies after a restart)"), summon), fromTop, mcp, Field(L.T("Text to highlight (one per line: #ff5555 error)"), highlights), Field(L.T("Tell me when the output shows (one word or regular expression per line, for new terminals; \"pattern => text\" types the text and Enter instead)"), triggers) } } }, cancel, save);
     });
 
     // Windows shows its own prompt, and waits for it, so this stays off the thread the window lives on.
@@ -838,6 +880,19 @@ public sealed partial class DialogHost : Panel
         catch (VaultLockedException ex)
         {
             await ConfirmAsync("Windows Hello", ex.Message, L.T("Close"));
+        }
+    }
+
+    private async Task ChangeLinksAsync(ILinkRegistration links, bool on)
+    {
+        try
+        {
+            if (on) links.Register();
+            else links.Unregister();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            await ConfirmAsync(L.T("Settings"), ex.Message, L.T("Close"));
         }
     }
 

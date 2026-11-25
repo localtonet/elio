@@ -87,7 +87,19 @@ public sealed class Vault
 
         // Opening the app must not raise a Windows Hello prompt, so a vault behind Hello starts out locked
         // and asks on first use.
-        _key = LoadOrCreateKey(prompt: false, out bool locked);
+        bool locked;
+        try
+        {
+            _key = LoadOrCreateKey(prompt: false, out locked);
+        }
+        catch (VaultLockedException)
+        {
+            // A key file behind Hello that this copy cannot read, written by a newer Elio or damaged. The app still
+            // starts, with the vault locked; opening it says why, and the file is left exactly as it is.
+            _key = null;
+            locked = true;
+        }
+
         _available = _key is not null || locked;
         if (!locked) _contents = _key is null ? new VaultContents() : Read(_key);
     }

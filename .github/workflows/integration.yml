@@ -1,0 +1,67 @@
+# Runs the tests that need a real SSH server (SshdIntegrationTests) against OpenSSH in a container. The ordinary
+# test run in ci.yml skips them, because ELIO_TEST_SSHD is not set there.
+name: Integration
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  sshd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # OpenSSH with SFTP, listening on 2222, with one user who logs in with a password. Throwaway: it lives only as
+      # long as this job, so the password is no secret.
+      sshd:
+        image: lscr.io/linuxserver/openssh-server:latest
+        ports:
+          - 2222:2222
+        env:
+          PUID: "1000"
+          PGID: "1000"
+          TZ: Etc/UTC
+          USER_NAME: elio
+          USER_PASSWORD: elio-integration-password
+          PASSWORD_ACCESS: "true"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build the tests
+        run: dotnet build tests/Elio.Tests -c Release
+
+      - name: Wait for sshd
+        run: |
+          for attempt in $(seq 1 60); do
+            if ssh-keyscan -p 2222 -T 2 127.0.0.1 2>/dev/null | grep -q ssh-; then
+              echo "sshd is answering"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "sshd did not start" >&2
+          exit 1
+
+      - name: Run the sshd tests
+        run: dotnet test tests/Elio.Tests -c Release --no-build --filter "FullyQualifiedName~SshdIntegrationTests" --logger "console;verbosity=normal"
+        env:
+          ELIO_TEST_SSHD: 127.0.0.1:2222:elio:elio-integration-password

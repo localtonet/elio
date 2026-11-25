@@ -35,6 +35,38 @@ public partial class MainView
         }
     }
 
+    /// <summary>
+    /// Writes the SSH servers as an OpenSSH config file, for ssh, scp, git and editors to use. Nothing from the vault
+    /// goes into it, and it is never written over ~/.ssh/config without the user choosing that file themselves.
+    /// </summary>
+    public async Task ExportSshConfigAsync()
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { CanSave: true } storage) return;
+
+        string title = L.T("Export servers as an OpenSSH config file");
+        IStorageFile? file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = title,
+            SuggestedFileName = "elio.ssh-config",
+            FileTypeChoices = [new FilePickerFileType("OpenSSH config") { Patterns = ["*"] }],
+        });
+        if (file is null) return;
+
+        try
+        {
+            string text = SshConfigExport.Write(AppServices.Library);
+            await using Stream stream = await file.OpenWriteAsync();
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(text);
+            int count = AppServices.Library.Hosts.Count(h => h.Kind == HostKind.Ssh && !h.Localtonet);
+            await Dialogs.ShowMessageAsync(title, L.T("Saved {0} servers. Passwords and keys from the vault are not in the file. To use it, add a line such as \"Include {1}\" to ~/.ssh/config.", count, file.Name));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await Dialogs.ShowMessageAsync(title, ex.Message);
+        }
+    }
+
     /// <summary>Asks for such a file and adds what is in it that is not here already.</summary>
     public async Task ImportServersAsync()
     {

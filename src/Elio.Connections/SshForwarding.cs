@@ -8,7 +8,9 @@ namespace Elio.Connections;
 /// <summary>Extras a shell can ask the server for.</summary>
 /// <param name="ForwardAgent">Programs on the server may use the keys in this computer's SSH agent.</param>
 /// <param name="ForwardX11">Graphical programs on the server open their windows on this computer.</param>
-public sealed record SshShellOptions(bool ForwardAgent = false, bool ForwardX11 = false);
+/// <param name="Environment">Variables to ask the server to set before the shell starts, as OpenSSH's SetEnv does. A server only takes the names its AcceptEnv allows.</param>
+/// <param name="ShareConnection">Whether the shell opens over the connection already open to the same server, if there is one. See <see cref="SshConnectionPool"/>.</param>
+public sealed record SshShellOptions(bool ForwardAgent = false, bool ForwardX11 = false, IReadOnlyDictionary<string, string>? Environment = null, bool ShareConnection = false);
 
 /// <summary>Answers the server's requests to the SSH agent by passing them to the agent on this computer.</summary>
 internal static class AgentRelay

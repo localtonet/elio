@@ -63,4 +63,52 @@ public sealed partial class DialogHost
         if (inputs.Count > 0) FocusWhenShown(inputs[0]);
         return Frame(title, body, cancel, ok);
     });
+
+    /// <summary>
+    /// Shows the fingerprint of a certificate this computer does not trust, for the user to compare with the one the
+    /// server itself shows, and asks whether to accept exactly that certificate. Cancel is the answer the dialog starts
+    /// on, and closing it says no.
+    /// </summary>
+    /// <param name="where">Where the user finds the fingerprint to compare with, on the server's side.</param>
+    /// <returns>Whether the user accepted it.</returns>
+    public Task<bool> AskTrustCertificateAsync(string title, string host, string fingerprint, string where) => Enqueue(false, result =>
+    {
+        var shown = new Border
+        {
+            Background = ElioColors.Surface,
+            BorderBrush = ElioColors.Border,
+            BorderThickness = new Avalonia.Thickness(1),
+            CornerRadius = new Avalonia.CornerRadius(ElioStyle.ControlRadius),
+            Padding = new Avalonia.Thickness(10, 8),
+            Child = new SelectableTextBlock
+            {
+                Text = fingerprint,
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                FontFamily = new Avalonia.Media.FontFamily("Consolas, Menlo, monospace"),
+                FontSize = 12,
+                Foreground = ElioColors.Text,
+                Tag = "certificate-fingerprint",
+            },
+        };
+
+        var body = new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                Paragraph(L.T("{0} presented a certificate this computer does not trust. A server that signed its own certificate, as Proxmox VE does when it is set up, always looks like this; so does someone in between pretending to be the server.", host)),
+                Paragraph(L.T("Its SHA-256 fingerprint is:")),
+                shown,
+                Paragraph(where),
+                Paragraph(L.T("Trust it only if the two are the same. Only this certificate is accepted for {0}, and a different one later is refused.", host)),
+            },
+        };
+
+        Button trust = MakeButton(L.T("Trust this certificate"), primary: true);
+        Button cancel = MakeButton(L.T("Cancel"), primary: false);
+        trust.Click += (_, _) => result.TrySetResult(true);
+        cancel.Click += (_, _) => result.TrySetResult(false);
+        FocusWhenShown(cancel);
+        return Frame(title, body, cancel, trust);
+    });
 }

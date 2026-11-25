@@ -47,7 +47,7 @@ public static class LibraryMerge
         foreach (Snippet snippet in file.Snippets)
         {
             if (library.Snippets.Any(s => s.Name == snippet.Name && s.Command == snippet.Command)) continue;
-            library.Snippets.Add(new Snippet { Name = snippet.Name, Command = snippet.Command, ModifiedUtc = DateTime.UtcNow });
+            library.Snippets.Add(new Snippet { Name = snippet.Name, Command = snippet.Command, Folder = snippet.Folder, ModifiedUtc = DateTime.UtcNow });
         }
 
         // The identity each server named in the file, taken off it until it is known which servers are new.

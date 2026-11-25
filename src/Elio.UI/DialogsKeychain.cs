@@ -138,6 +138,7 @@ public sealed partial class DialogHost
         TextBox user = Input(existing?.User, tag: "identity-user");
         var kind = new ComboBox { ItemsSource = new[] { L.T("Password"), L.T("Private key") }, SelectedIndex = (int)(existing?.Kind ?? IdentityKind.Password), HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "identity-kind" };
         TextBox password = Input(secret: true, tag: "identity-password");
+        ToolTip.SetTip(password, L.T("A password, or where a password manager keeps it: op://vault/item/password for 1Password, bw://item for Bitwarden."));
         TextBox key = MultiLine(null, "identity-key");
         key.FontFamily = new FontFamily("Consolas, Menlo, monospace");
         key.FontSize = 12;
@@ -520,6 +521,8 @@ public sealed partial class DialogHost
         private readonly TextBox _port;
         private readonly TextBox _user;
         private readonly TextBox _password = Input(secret: true, tag: "proxy-password");
+        private readonly TextBox _command;
+        private readonly Control _commandField;
         private readonly StackPanel _details;
         private readonly bool _forServer;
 
@@ -535,6 +538,23 @@ public sealed partial class DialogHost
             _host = Input(current?.Host, tag: "proxy-host");
             _port = Input(current is { Port: > 0 } ? current.Port.ToString() : null, tag: "proxy-port");
             _user = Input(current?.User, tag: "proxy-user");
+            _command = Input(current?.Command, tag: "proxy-command");
+            _command.PlaceholderText = "cloudflared access ssh --hostname %h";
+            _commandField = new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    Field(L.T("Command (%h is the address, %p the port, %r the user)"), _command),
+                    new TextBlock
+                    {
+                        Text = L.T("It runs on this computer, and its input and output carry the connection. Elio asks before it runs a command for the first time."),
+                        FontSize = 12,
+                        Foreground = ElioColors.TextMuted,
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                },
+            };
             if (passwordSaved) _password.PlaceholderText = L.T("Saved. Leave empty to keep it.");
 
             var address = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,90") };
@@ -549,7 +569,7 @@ public sealed partial class DialogHost
                 Children = { address, Field(L.T("Proxy user name (optional)"), _user), Field(L.T("Proxy password (optional)"), _password) },
             };
 
-            View = new StackPanel { Spacing = 12, Children = { Field(L.T("Connect through"), _kind), _details } };
+            View = new StackPanel { Spacing = 12, Children = { Field(L.T("Connect through"), _kind), _details, _commandField } };
             _kind.SelectionChanged += (_, _) =>
             {
                 if (!_rebuilding) _wanted = Chosen;
@@ -569,6 +589,7 @@ public sealed partial class DialogHost
         private void ShowDetails()
         {
             _details.IsVisible = Chosen is ProxyKind.Socks5 or ProxyKind.Http;
+            _commandField.IsVisible = Chosen is ProxyKind.Command;
 
             // The usual port of each kind is offered, but only shown, never filled in: it has to be typed to count.
             _port.PlaceholderText = Chosen == ProxyKind.Http ? "8080" : "1080";
@@ -599,6 +620,7 @@ public sealed partial class DialogHost
 
             Add(SocksLabel, ProxyKind.Socks5);
             Add(HttpLabel, ProxyKind.Http);
+            Add(L.T("A command (ProxyCommand)"), ProxyKind.Command);
 
             _rebuilding = true;
             _kind.ItemsSource = labels;
@@ -623,6 +645,19 @@ public sealed partial class DialogHost
                 return true;
             }
 
+            if (kind == ProxyKind.Command)
+            {
+                string command = _command.Text?.Trim() ?? string.Empty;
+                if (command.Length == 0)
+                {
+                    error = L.T("Write the command to connect through.");
+                    return false;
+                }
+
+                proxy = new ProxySettings { Kind = ProxyKind.Command, Command = command };
+                return true;
+            }
+
             string host = _host.Text?.Trim() ?? string.Empty;
             if (host.Length == 0 || !int.TryParse(_port.Text, out int port) || port is < 1 or > 65535)
             {
@@ -640,7 +675,7 @@ public sealed partial class DialogHost
             Guid id = ProxySettings.SecretId(owner);
             Vault vault = AppServices.Vault;
 
-            if (proxy is { Kind: not ProxyKind.None, User.Length: > 0 })
+            if (proxy is { Kind: ProxyKind.Socks5 or ProxyKind.Http, User.Length: > 0 })
             {
                 if (!string.IsNullOrEmpty(_password.Text)) vault.Set(id, _password.Text);
             }

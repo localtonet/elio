@@ -1,5 +1,8 @@
-# Builds what a pull request can break: the desktop app, the sync server and the website.
+# Builds what a pull request can break: the desktop app, the sync server and the website, on Linux, Windows and macOS.
 # The terminal engine comes from native/out in the repository; a release rebuilds it from source.
+#
+# The tests run on all three. They never load the terminal engine (they pass with it taken out of their folder), which
+# matters on macOS: native/out in the repository has only the Linux and Windows libraries.
 name: CI
 
 on:
@@ -20,7 +23,11 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
@@ -34,10 +41,13 @@ jobs:
 
       - run: dotnet test tests/Elio.Tests -c Release
 
+      # The last two run on Linux only, because they would find the same on every system.
       # A trimmed publish is where code that trimming would break shows up, as warnings that fail the build.
-      - run: dotnet publish src/Elio.Desktop -c Release -r linux-x64 -o publish
+      - if: runner.os == 'Linux'
+        run: dotnet publish src/Elio.Desktop -c Release -r linux-x64 -o publish
 
       - name: Known vulnerabilities in packages
+        if: runner.os == 'Linux'
         run: |
           dotnet list src/Elio.Desktop package --vulnerable --include-transitive | tee vulnerable.txt
           dotnet list server/Elio.SyncServer package --vulnerable --include-transitive | tee -a vulnerable.txt

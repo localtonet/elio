@@ -86,7 +86,25 @@ public interface IPluginActions
     /// <summary>Asks the user for a line of text.</summary>
     /// <returns>What was typed, or null if the user backed out.</returns>
     Task<string?> PromptAsync(string plugin, string title, string? placeholder);
+
+    /// <summary>The saved servers, as a plugin may see them: names, addresses, users, groups and tags. Never a secret.</summary>
+    Task<IReadOnlyList<PluginServerListing>> ListServersAsync(string plugin) => Task.FromResult<IReadOnlyList<PluginServerListing>>([]);
+
+    /// <summary>What the last command in the active terminal printed, where the shell marks its commands. Null otherwise.</summary>
+    Task<string?> LastOutputAsync(string plugin) => Task.FromResult<string?>(null);
+
+    /// <summary>Opens a saved server by name in a new tab. False if there is no server by that name.</summary>
+    Task<bool> ConnectAsync(string plugin, string server) => Task.FromResult(false);
+
+    /// <summary>Lets the user pick one of several lines. Returns its position, or null if the user backed out.</summary>
+    Task<int?> ChooseAsync(string plugin, string title, IReadOnlyList<string> choices) => Task.FromResult<int?>(null);
+
+    /// <summary>Shows a longer text than a note can hold, in a window of its own.</summary>
+    Task ShowTextAsync(string plugin, string title, string text) => NotifyAsync(plugin, text);
 }
+
+/// <summary>A saved server as a plugin is told about it. There is nothing secret in it, and no way to ask for more.</summary>
+public sealed record PluginServerListing(string Name, string Kind, string Address, string? User, string? Group, IReadOnlyList<string> Tags);
 
 internal sealed record PluginManifest(
     string Name,
@@ -185,8 +203,9 @@ public sealed class PluginHost : IDisposable
             {
                 found.Add(new PluginInfo(fallback, folder, string.Empty, string.Empty, ex.Message));
             }
-            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
             {
+                // One plugin that cannot be read is listed as broken; it never keeps the others from loading.
                 found.Add(new PluginInfo(fallback, folder, string.Empty, string.Empty, L.T("plugin.json could not be read: {0}", ex.Message)));
             }
         }
@@ -219,6 +238,9 @@ public sealed class PluginHost : IDisposable
 
         string command = PluginJson.Text(root, "command") ?? string.Empty;
         if (command.Trim().Length == 0) throw new PluginException(L.T("plugin.json does not say which command to run."));
+
+        // A control character, a NUL above all, is never part of a program's name, and the system would refuse it later anyway.
+        if (command.Any(char.IsControl)) throw new PluginException(L.T("In plugin.json, \"{0}\" is not written the way it should be.", "command"));
 
         var args = new List<string>();
         if (root.TryGetProperty("args", out JsonElement list))
@@ -439,9 +461,21 @@ internal static class PluginJson
     // A line longer than this is not a message anyone meant to send. It is dropped, not kept in memory.
     private const int MaxLineBytes = 1024 * 1024;
 
-    /// <summary>The text under a name, or null if it is missing or not text.</summary>
-    public static string? Text(JsonElement parent, string name) =>
-        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    /// <summary>The text under a name, or null if it is missing, not text, or not valid UTF-8.</summary>
+    public static string? Text(JsonElement parent, string name)
+    {
+        if (parent.ValueKind != JsonValueKind.Object || !parent.TryGetProperty(name, out JsonElement value) || value.ValueKind != JsonValueKind.String) return null;
+
+        try
+        {
+            return value.GetString();
+        }
+        catch (InvalidOperationException)
+        {
+            // The JSON was well formed but the text in it was not UTF-8: from a plugin, that is a message nobody can read.
+            return null;
+        }
+    }
 
     /// <summary>Reads lines of UTF-8 from a pipe until it closes, skipping empty ones and any that are far too long.</summary>
     public static async IAsyncEnumerable<string> LinesAsync(Stream stream, [EnumeratorCancellation] CancellationToken cancellation = default)
@@ -498,6 +532,12 @@ internal sealed class PluginProcess : IDisposable
     private const int InvalidParams = -32602;
     private const int ActionFailed = -32000;
     private const int NotRunning = -32001;
+
+    // A list longer than this is not a choice a person makes.
+    private const int MaxChoices = 500;
+
+    // More text than this is a file, not something to read in a window.
+    private const int MaxShown = 256 * 1024;
 
     private readonly PluginManifest _manifest;
     private readonly IPluginActions _actions;
@@ -845,7 +885,7 @@ internal sealed class PluginProcess : IDisposable
 
     private async Task<Action<Utf8JsonWriter>> CallAsync(string method, JsonElement parameters)
     {
-        if (method is not ("terminal/send" or "terminal/run" or "notify" or "clipboard/write" or "openUrl" or "prompt"))
+        if (method is not ("terminal/send" or "terminal/run" or "notify" or "clipboard/write" or "openUrl" or "prompt" or "servers/list" or "terminal/lastOutput" or "terminal/connect" or "choose" or "show" or "ping"))
             return Error(MethodNotFound, $"Unknown method: {method}");
 
         // A plugin acts only when the user has asked it to. One that could type into a terminal whenever
@@ -883,6 +923,73 @@ internal sealed class PluginProcess : IDisposable
                     return Error(InvalidParams, "Only http and https addresses can be opened.");
                 await _actions.OpenUrlAsync(name, url).ConfigureAwait(false);
                 return Done;
+
+            // A command that is still working says so, so that it is not taken to be stuck. Asking anything does that; this asks nothing.
+            case "ping":
+                return Done;
+
+            case "show":
+                if (PluginJson.Text(parameters, "text") is not string shown) return Missing("text");
+                await _actions.ShowTextAsync(name, PluginJson.Text(parameters, "title") ?? name, shown.Length <= MaxShown ? shown : shown[..MaxShown]).ConfigureAwait(false);
+                return Done;
+
+            case "servers/list":
+                IReadOnlyList<PluginServerListing> servers = await _actions.ListServersAsync(name).ConfigureAwait(false);
+                return writer =>
+                {
+                    writer.WriteStartObject("result");
+                    writer.WriteStartArray("servers");
+                    foreach (PluginServerListing server in servers)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("name", server.Name);
+                        writer.WriteString("kind", server.Kind);
+                        writer.WriteString("address", server.Address);
+                        if (server.User is not null) writer.WriteString("user", server.User);
+                        if (server.Group is not null) writer.WriteString("group", server.Group);
+                        writer.WriteStartArray("tags");
+                        foreach (string tag in server.Tags) writer.WriteStringValue(tag);
+                        writer.WriteEndArray();
+                        writer.WriteEndObject();
+                    }
+
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                };
+
+            case "terminal/lastOutput":
+                string? output = await _actions.LastOutputAsync(name).ConfigureAwait(false);
+                return writer =>
+                {
+                    writer.WriteStartObject("result");
+                    if (output is null) writer.WriteNull("text");
+                    else writer.WriteString("text", output);
+                    writer.WriteEndObject();
+                };
+
+            case "terminal/connect":
+                if (PluginJson.Text(parameters, "server") is not string server) return Missing("server");
+                return await _actions.ConnectAsync(name, server).ConfigureAwait(false) ? Done : Error(ActionFailed, $"There is no server called \"{server}\".");
+
+            case "choose":
+                if (PluginJson.Text(parameters, "title") is not string question) return Missing("title");
+                if (!parameters.TryGetProperty("choices", out JsonElement list) || list.ValueKind != JsonValueKind.Array || list.GetArrayLength() is 0 or > MaxChoices)
+                    return Error(InvalidParams, $"\"choices\" must be a list of 1 to {MaxChoices} lines of text.");
+                var choices = new List<string>();
+                foreach (JsonElement item in list.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.String) return Error(InvalidParams, "Every choice must be text.");
+                    choices.Add(item.GetString()!);
+                }
+
+                int? picked = await _actions.ChooseAsync(name, question, choices).ConfigureAwait(false);
+                return writer =>
+                {
+                    writer.WriteStartObject("result");
+                    if (picked is int index) writer.WriteNumber("index", index);
+                    else writer.WriteNull("index");
+                    writer.WriteEndObject();
+                };
 
             default:
                 if (PluginJson.Text(parameters, "title") is not string title) return Missing("title");

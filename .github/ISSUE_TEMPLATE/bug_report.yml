@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in Elio does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this.
+
+        **A security problem does not belong here.** [SECURITY.md](https://github.com/localtonet/elio/blob/main/SECURITY.md) says how to report it privately.
+
+        This page is public: leave out passwords, private keys, tokens, and any server name or address you would not post in public.
+
+  - type: input
+    id: version
+    attributes:
+      label: Elio version
+      description: Shown in the sidebar and at the top of Settings.
+      placeholder: 0.1.8
+    validations:
+      required: true
+
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows (x64)
+        - Windows (ARM64)
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Linux (x64)
+        - Linux (ARM64)
+        - Android
+        - iPhone or iPad
+    validations:
+      required: true
+
+  - type: input
+    id: system-version
+    attributes:
+      label: Version of the system
+      placeholder: Windows 11 24H2, macOS 15.1, Ubuntu 24.04, Android 15
+
+  - type: dropdown
+    id: installed
+    attributes:
+      label: How Elio was installed
+      options:
+        - The zip or tar.gz from the releases page
+        - The .deb
+        - The AppImage
+        - Homebrew
+        - Scoop
+        - Google Play
+        - The APK from the releases page
+        - TestFlight
+        - Built from source
+        - Another way
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The steps, from opening Elio. Say if it happens every time or only sometimes.
+      placeholder: |
+        1. Connect to a server over SSH
+        2. Open files beside the terminal
+        3. ...
+
+  - type: textarea
+    id: connection
+    attributes:
+      label: The connection, if the problem has to do with one
+      description: |
+        The kind of connection (SSH, Mosh, Telnet, serial port, local shell, Localtonet device), the server's system and SSH server (for example Ubuntu 24.04 with OpenSSH 9.6), and what is set under Advanced, such as jump hosts, a proxy or port forwards.
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message
+      description: The exact text of any error Elio showed. Text can be searched; a screenshot can go in the box above.
+      render: text

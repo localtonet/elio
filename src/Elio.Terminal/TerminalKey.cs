@@ -72,3 +72,31 @@ public enum TerminalMods : ushort
     Alt = 1 << 2,
     Super = 1 << 3,
 }
+
+/// <summary>What happened to a key, numbered as libghostty-vt expects. Only a program that asked hears of repeats and releases.</summary>
+public enum TerminalKeyAction
+{
+    Release = 0,
+    Press = 1,
+    Repeat = 2,
+}
+
+/// <summary>What a program asked of the keyboard with the Kitty keyboard protocol (CSI &gt; flags u).</summary>
+[Flags]
+public enum KittyKeyboardFlags : byte
+{
+    None = 0,
+
+    /// <summary>Keys that are ambiguous in the usual encoding, such as Escape or Ctrl+I next to Tab, come as CSI u.</summary>
+    Disambiguate = 1 << 0,
+
+    /// <summary>Repeats and releases are reported too, not only presses.</summary>
+    ReportEvents = 1 << 1,
+
+    ReportAlternateKeys = 1 << 2,
+
+    /// <summary>Every key comes as an escape code, plain characters included.</summary>
+    ReportAllKeys = 1 << 3,
+
+    ReportText = 1 << 4,
+}

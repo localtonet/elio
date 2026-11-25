@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/localtonet/elio/security/advisories/new
+    about: Report it privately, never in a public issue. SECURITY.md says what to include.
+  - name: Code of conduct
+    url: https://github.com/localtonet/elio/blob/main/CODE_OF_CONDUCT.md
+    about: What is expected of everyone here, and how to report behavior privately.

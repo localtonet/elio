@@ -157,9 +157,28 @@ public sealed class SftpConnection : IDisposable
     public Task RenameAsync(RemoteEntry entry, string to, CancellationToken cancellation) =>
         Task.Run(() => entry.Source!.MoveTo(to), cancellation);
 
-    /// <summary>Sets permissions, given as digits such as 644.</summary>
-    public Task ChangeModeAsync(string path, short mode, CancellationToken cancellation) =>
-        Task.Run(() => Client.ChangePermissions(path, mode), cancellation);
+    /// <summary>
+    /// Sets permissions to nine bits, such as 0b110_100_100 for 644. Something from a listing is changed in one request, by
+    /// the name it was listed under, and a folder keeps its set-user and set-group bits as <c>chmod</c> leaves them. A link,
+    /// or an entry that was not listed, is changed by its path, which the server follows: what a link points at changes.
+    /// </summary>
+    public async Task ChangeModeAsync(RemoteEntry entry, int mode, CancellationToken cancellation)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, Lost);
+        if (entry.Source is not ISftpFile file || entry.IsSymbolicLink)
+        {
+            await Task.Run(() => Client.ChangePermissions(entry.FullPath, DigitsOf(mode, 0)), linked.Token).ConfigureAwait(false);
+            return;
+        }
+
+        // The bits above the nine, as the number's first digit: 4 set-user and 2 set-group are kept, 1 the sticky bit goes.
+        int special = entry.IsDirectory ? (file.Attributes.IsUIDBitSet ? 4 : 0) + (file.Attributes.IsGroupIDBitSet ? 2 : 0) : 0;
+        await Task.Run(() => file.SetPermissions(DigitsOf(mode, special)), linked.Token).ConfigureAwait(false);
+    }
+
+    // The client takes permissions as a number whose decimal digits are the octal ones: 0b110_100_100 is 644.
+    private static short DigitsOf(int mode, int special) =>
+        (short)((special * 1000) + (((mode >> 6) & 7) * 100) + (((mode >> 3) & 7) * 10) + (mode & 7));
 
     /// <summary>Deletes a file or link, or a folder with everything inside it.</summary>
     public async Task DeleteAsync(RemoteEntry entry, CancellationToken cancellation)

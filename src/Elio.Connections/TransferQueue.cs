@@ -44,6 +44,161 @@ public enum ConflictChoice
 /// <summary>Asked when a destination file exists. Returns the choice, and whether to use it for the rest of the job.</summary>
 public delegate Task<(ConflictChoice Choice, bool ForAll)> ConflictResolver(TransferJob job, string path);
 
+/// <summary>
+/// A speed limit, as a bucket of bytes that fills at the speed allowed. Every transfer going the same way takes its bytes
+/// from the same bucket, so four files at once share the limit instead of each getting all of it. A transfer that asks for
+/// more than is there is told how long until its bytes are paid for and sleeps that long, once: nothing spins, and those
+/// that asked first go first.
+/// </summary>
+public sealed class TransferThrottle
+{
+    // After a pause, this much of a second may go at once. Enough that a little idling is not lost, too little to be noticed.
+    private const double BurstSeconds = 0.25;
+
+    // A transfer that is held back sends in pieces of about this much time, so that it moves steadily rather than in jumps.
+    private const double PieceSeconds = 0.1;
+    private const int SmallestPiece = 1024;
+
+    private readonly object _gate = new();
+    private readonly Func<long> _now;
+    private readonly long _ticksPerSecond;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private long _bytesPerSecond;
+    private double _tokens;
+    private long _last;
+    private int _generation;
+
+    // Cancelled when the limit changes, which wakes everyone who is sleeping on the old one. Not disposed when replaced:
+    // a sleeper may still be linking to it, and it holds no timer.
+    private CancellationTokenSource _changed = new();
+
+    public TransferThrottle() : this(System.Diagnostics.Stopwatch.GetTimestamp, System.Diagnostics.Stopwatch.Frequency, Task.Delay)
+    {
+    }
+
+    /// <summary>A throttle that goes by another clock, such as one a test moves by hand.</summary>
+    /// <param name="now">The time now, in ticks of <paramref name="ticksPerSecond"/>.</param>
+    /// <param name="delay">Waits that long, or until cancelled.</param>
+    internal TransferThrottle(Func<long> now, long ticksPerSecond, Func<TimeSpan, CancellationToken, Task> delay)
+    {
+        _now = now;
+        _ticksPerSecond = ticksPerSecond;
+        _delay = delay;
+        _last = now();
+    }
+
+    /// <summary>What all downloads share, and copies between two servers too.</summary>
+    public static TransferThrottle Downloads { get; } = new();
+
+    /// <summary>What all uploads share, and copies between two servers too.</summary>
+    public static TransferThrottle Uploads { get; } = new();
+
+    /// <summary>The limit, in bytes a second. 0 means none, and then nothing ever waits.</summary>
+    public long BytesPerSecond
+    {
+        get => Interlocked.Read(ref _bytesPerSecond);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            CancellationTokenSource old;
+            lock (_gate)
+            {
+                if (value == _bytesPerSecond) return;
+
+                // What was owed under the old limit is forgotten, and the bucket starts empty under the new one.
+                Interlocked.Exchange(ref _bytesPerSecond, value);
+                _tokens = 0;
+                _last = _now();
+                _generation++;
+                old = _changed;
+                _changed = new CancellationTokenSource();
+            }
+
+            old.Cancel();
+        }
+    }
+
+    /// <summary>How much to send at a time, at most <paramref name="largest"/>: less while a limit holds the transfer back.</summary>
+    public int PieceFor(int largest)
+    {
+        long rate = BytesPerSecond;
+        if (rate == 0) return largest;
+
+        long piece = (long)(rate * PieceSeconds);
+        return (int)Math.Clamp(piece, Math.Min(SmallestPiece, largest), largest);
+    }
+
+    /// <summary>Returns once these bytes may go. At once when there is no limit.</summary>
+    /// <exception cref="OperationCanceledException">Cancelled while waiting. The bytes are given back to the others.</exception>
+    public async ValueTask WaitAsync(int bytes, CancellationToken cancellation)
+    {
+        while (true)
+        {
+            if (Interlocked.Read(ref _bytesPerSecond) == 0) return;
+
+            TimeSpan wait;
+            CancellationToken changed;
+            int generation;
+            lock (_gate)
+            {
+                long rate = _bytesPerSecond;
+                if (rate == 0) return;
+
+                long now = _now();
+                _tokens = Math.Min(rate * BurstSeconds, _tokens + ((now - _last) * (double)rate / _ticksPerSecond));
+                _last = now;
+
+                // Taken now, even into debt: whoever asks next finds the debt and waits behind this one.
+                _tokens -= bytes;
+                if (_tokens >= 0) return;
+
+                wait = TimeSpan.FromSeconds(-_tokens / rate);
+                changed = _changed.Token;
+                generation = _generation;
+            }
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, changed);
+            try
+            {
+                await _delay(wait, linked.Token).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+            {
+                // The limit changed while this slept. The debt went with it, and the bytes are asked for again under the new one.
+            }
+            catch (OperationCanceledException)
+            {
+                // Paused or stopped: these bytes are not going after all, so the others need not wait for them.
+                lock (_gate)
+                {
+                    if (generation == _generation) _tokens += bytes;
+                }
+
+                throw;
+            }
+        }
+    }
+
+    /// <summary>The piece size that suits every one of several limits.</summary>
+    internal static int PieceFor(IReadOnlyList<TransferThrottle>? throttles, int largest)
+    {
+        if (throttles is null) return largest;
+        foreach (TransferThrottle throttle in throttles) largest = throttle.PieceFor(largest);
+        return largest;
+    }
+
+    /// <summary>
+    /// Waits until the bytes may go under every one of several limits. One after the other is enough: while the first is
+    /// waited for, the second fills, so the slower of the two is what sets the pace.
+    /// </summary>
+    internal static async ValueTask WaitAsync(IReadOnlyList<TransferThrottle>? throttles, int bytes, CancellationToken cancellation)
+    {
+        if (throttles is null) return;
+        foreach (TransferThrottle throttle in throttles) await throttle.WaitAsync(bytes, cancellation).ConfigureAwait(false);
+    }
+}
+
 internal sealed class TransferFile(TransferJob job, string source, string destination, long size, DateTime modifiedUtc)
 {
     private long _counted;
@@ -275,6 +430,12 @@ public sealed class TransferQueue : IAsyncDisposable
     /// </summary>
     public bool SameServer { get; init; }
 
+    /// <summary>The limit downloads go by. Shared with every other queue unless a test gives one of its own.</summary>
+    public TransferThrottle DownloadLimit { get; init; } = TransferThrottle.Downloads;
+
+    /// <summary>The limit uploads go by. Shared with every other queue unless a test gives one of its own.</summary>
+    public TransferThrottle UploadLimit { get; init; } = TransferThrottle.Uploads;
+
     public IReadOnlyList<TransferJob> Jobs
     {
         get
@@ -293,23 +454,27 @@ public sealed class TransferQueue : IAsyncDisposable
 
     private static string TitleFor(IReadOnlyList<string> names) => names.Count == 1 ? names[0] : L.T("{0} and {1} more items", names[0], names.Count - 1);
 
-    public TransferJob Upload(IReadOnlyList<string> localPaths, string remoteFolder, TransferServer server = TransferServer.First)
+    /// <param name="whenExists">What to do with a file that is already there, decided beforehand, such as by a synchronisation the user has looked over. Null asks.</param>
+    public TransferJob Upload(IReadOnlyList<string> localPaths, string remoteFolder, TransferServer server = TransferServer.First, ConflictChoice? whenExists = null)
     {
         string title = TitleFor(localPaths.Select(p => Path.GetFileName(p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))).ToList());
-        return Add(new TransferJob(TransferKind.Upload, title, localPaths, [], remoteFolder, server));
+        return Add(new TransferJob(TransferKind.Upload, title, localPaths, [], remoteFolder, server), whenExists);
     }
 
-    public TransferJob Download(IReadOnlyList<RemoteEntry> entries, string localFolder, TransferServer server = TransferServer.First) =>
-        Add(new TransferJob(TransferKind.Download, TitleFor(entries.Select(e => e.Name).ToList()), [], entries, localFolder, server));
+    /// <param name="whenExists">What to do with a file that is already there, decided beforehand. Null asks.</param>
+    public TransferJob Download(IReadOnlyList<RemoteEntry> entries, string localFolder, TransferServer server = TransferServer.First, ConflictChoice? whenExists = null) =>
+        Add(new TransferJob(TransferKind.Download, TitleFor(entries.Select(e => e.Name).ToList()), [], entries, localFolder, server), whenExists);
 
     /// <summary>Copies files and folders from one of the queue's two servers into a folder on the other.</summary>
-    public TransferJob Copy(IReadOnlyList<RemoteEntry> entries, string targetFolder, TransferServer from = TransferServer.First) =>
-        Add(new TransferJob(TransferKind.Copy, TitleFor(entries.Select(e => e.Name).ToList()), [], entries, targetFolder, from));
+    /// <param name="whenExists">What to do with a file that is already there, decided beforehand. Null asks.</param>
+    public TransferJob Copy(IReadOnlyList<RemoteEntry> entries, string targetFolder, TransferServer from = TransferServer.First, ConflictChoice? whenExists = null) =>
+        Add(new TransferJob(TransferKind.Copy, TitleFor(entries.Select(e => e.Name).ToList()), [], entries, targetFolder, from), whenExists);
 
-    private TransferJob Add(TransferJob job)
+    private TransferJob Add(TransferJob job, ConflictChoice? whenExists)
     {
         if ((int)job.Server >= _links.Length || (int)job.TargetServer >= _links.Length) throw new InvalidOperationException("This queue was made for one server.");
 
+        job.DecisionForAll = whenExists;
         lock (_gate) _jobs.Add(job);
         Pulse();
         return job;
@@ -681,9 +846,9 @@ public sealed class TransferQueue : IAsyncDisposable
         {
             await (job.Kind switch
             {
-                TransferKind.Upload => SftpCopy.UploadAsync(client, file.Source, file.Destination, file.SetPosition, file.Add, linked.Token),
-                TransferKind.Download => SftpCopy.DownloadAsync(client, file.Source, file.Destination, file.ModifiedUtc, file.SetPosition, file.Add, linked.Token),
-                _ => SftpCopy.CopyAsync(client, session.Get(job.TargetServer).Client, file.Source, file.Destination, file.SetPosition, file.Add, linked.Token),
+                TransferKind.Upload => SftpCopy.UploadAsync(client, file.Source, file.Destination, file.SetPosition, file.Add, linked.Token, LimitsFor(job.Kind)),
+                TransferKind.Download => SftpCopy.DownloadAsync(client, file.Source, file.Destination, file.ModifiedUtc, file.SetPosition, file.Add, linked.Token, LimitsFor(job.Kind)),
+                _ => SftpCopy.CopyAsync(client, session.Get(job.TargetServer).Client, file.Source, file.Destination, file.SetPosition, file.Add, linked.Token, LimitsFor(job.Kind)),
             }).ConfigureAwait(false);
 
             job.FileDone();
@@ -703,6 +868,15 @@ public sealed class TransferQueue : IAsyncDisposable
 
         Pulse();
     }
+
+    // A copy between two servers brings the data in and sends it out again, so it counts as both, and the lower of the
+    // two limits is the one it ends up going by.
+    internal TransferThrottle[] LimitsFor(TransferKind kind) => kind switch
+    {
+        TransferKind.Upload => [UploadLimit],
+        TransferKind.Download => [DownloadLimit],
+        _ => [DownloadLimit, UploadLimit],
+    };
 
     private static bool IsLinkProblem(Exception ex) =>
         ex is SshConnectionException or SocketException or SshOperationTimeoutException or ObjectDisposedException

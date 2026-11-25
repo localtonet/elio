@@ -52,4 +52,7 @@
     <ProjectReference Include="..\Elio.UI\Elio.UI.csproj" />
     <ProjectReference Include="..\Elio.Connections\Elio.Connections.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elio.Tests" />
+  </ItemGroup>
 </Project>

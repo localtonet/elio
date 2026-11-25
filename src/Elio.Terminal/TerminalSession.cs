@@ -47,6 +47,7 @@ public sealed partial class TerminalSession : IAsyncDisposable
     private const int ZmodemMarkerLength = 6;
 
     private OutputLog? _log;
+    private CastRecorder? _cast;
     private volatile ZmodemTransfer? _zmodem;
     private readonly ZmodemDetector _zmodemDetector = new();
 
@@ -73,6 +74,12 @@ public sealed partial class TerminalSession : IAsyncDisposable
 
     /// <summary>The running program reported how far along it is, or that it is no longer reporting.</summary>
     public event Action<TerminalProgress>? ProgressChanged;
+
+    /// <summary>Raised with each line of output that matched one of the rules the user wrote, and the reply it asks for.</summary>
+    public event Action<TriggerHit>? Triggered;
+
+    /// <summary>The words to watch the output for. Null watches for nothing.</summary>
+    public OutputWatcher? Watcher { get; set; }
 
     /// <summary>What the running program last reported about its progress.</summary>
     public TerminalProgress Progress { get; private set; }
@@ -104,6 +111,9 @@ public sealed partial class TerminalSession : IAsyncDisposable
     /// <summary>The file output is being saved to, if any.</summary>
     public string? LogPath => _log?.Path;
 
+    /// <summary>Where the recording of this terminal goes, while one is being made.</summary>
+    public string? RecordingPath => _cast?.Path;
+
     public unsafe TerminalSession(ITerminalTransport transport, int columns, int rows, TerminalTheme? theme = null, int scrollbackLines = 10_000)
     {
         _transport = transport;
@@ -134,6 +144,9 @@ public sealed partial class TerminalSession : IAsyncDisposable
         Check(Ghostty.TerminalSet(_terminal, Ghostty.TerminalOptDesktopNotification, (delegate* unmanaged<nint, nint, Ghostty.DesktopNotification*, void>)&OnEngineNotification));
         Check(Ghostty.TerminalSet(_terminal, Ghostty.TerminalOptProgressReport, (delegate* unmanaged<nint, nint, Ghostty.ProgressReport*, void>)&OnEngineProgress));
         Check(Ghostty.TerminalSet(_terminal, Ghostty.TerminalOptSemanticPrompt, (delegate* unmanaged<nint, nint, Ghostty.SemanticPrompt*, void>)&OnEnginePrompt));
+        Check(Ghostty.TerminalSet(_terminal, Ghostty.TerminalOptDeviceAttributes, (delegate* unmanaged<nint, nint, Ghostty.DeviceAttributes*, byte>)&OnEngineDeviceAttributes));
+        Check(Ghostty.TerminalSet(_terminal, Ghostty.TerminalOptSize, (delegate* unmanaged<nint, nint, Ghostty.SizeReport*, byte>)&OnEngineSize));
+        _sixel = new SixelFilter(WriteToEngine, ShowSixel, BeginSixel);
 
         // The engine also limits the history by size, to about 400 rows of a wide terminal unless told
         // otherwise, and whichever limit is reached first wins. The number of lines is the one that is meant.
@@ -313,13 +326,16 @@ public sealed partial class TerminalSession : IAsyncDisposable
         TerminalProgress? progress;
         string? directory = null;
         CommandFinished[]? finished = null;
+        List<TriggerHit>? matched = null;
 
         lock (_terminalGate)
         {
             if (_disposed != 0) return;
             _log?.Write(data);
+            _cast?.Write(data);
+            if (Watcher is { IsEmpty: false } watcher) matched = watcher.Feed(data);
             _contentVersion++;
-            fixed (byte* pointer = data) Write(pointer, (nuint)data.Length);
+            _sixel.Write(data);
 
             if (_finishedPending.Count > 0)
             {
@@ -346,6 +362,10 @@ public sealed partial class TerminalSession : IAsyncDisposable
         SignalChanged();
         if (bell) Bell?.Invoke();
         if (note is var (title, body)) Notified?.Invoke(title, body);
+        if (matched is not null)
+        {
+            foreach (TriggerHit hit in matched) Triggered?.Invoke(hit);
+        }
         if (progress is TerminalProgress reported) ProgressChanged?.Invoke(reported);
         if (directory is not null) WorkingDirectoryChanged?.Invoke(directory);
         if (finished is not null)
@@ -374,8 +394,11 @@ public sealed partial class TerminalSession : IAsyncDisposable
         _outgoing.Writer.TryWrite(data.ToArray());
     }
 
-    /// <summary>Encodes a key the way the running program asked for. Returns false if the key produces nothing.</summary>
-    public unsafe bool SendKey(TerminalKey key, TerminalMods mods, uint unshiftedCodepoint, string? text)
+    /// <summary>
+    /// Encodes a key the way the running program asked for. Returns false if the key produces nothing, which is
+    /// always the case for a repeat or release the program did not ask to hear of (Kitty keyboard flag 2).
+    /// </summary>
+    public unsafe bool SendKey(TerminalKey key, TerminalMods mods, uint unshiftedCodepoint, string? text, TerminalKeyAction action = TerminalKeyAction.Press)
     {
         if (ZmodemActive) return true;
 
@@ -386,8 +409,10 @@ public sealed partial class TerminalSession : IAsyncDisposable
         lock (_terminalGate)
         {
             if (_disposed != 0) return false;
+
+            // The encoder takes the program's Kitty keyboard flags, cursor key mode and the like from the terminal each time.
             Check(Ghostty.KeyEncoderSetFromTerminal(_keyEncoder, _terminal));
-            Check(Ghostty.KeyEventSetAction(_keyEvent, Ghostty.KeyActionPress));
+            Check(Ghostty.KeyEventSetAction(_keyEvent, (int)action));
             Check(Ghostty.KeyEventSetKey(_keyEvent, (int)key));
             Check(Ghostty.KeyEventSetMods(_keyEvent, (ushort)mods));
             Check(Ghostty.KeyEventSetUnshiftedCodepoint(_keyEvent, unshiftedCodepoint));
@@ -403,27 +428,50 @@ public sealed partial class TerminalSession : IAsyncDisposable
         }
 
         if (written == 0) return false;
-        JumpToBottom();
+
+        // Letting go of a key is no reason to move the screen.
+        if (action != TerminalKeyAction.Release) JumpToBottom();
         _outgoing.Writer.TryWrite(encoded[..(int)written].ToArray());
         return true;
     }
 
+    /// <summary>What the running program asked of the keyboard with the Kitty keyboard protocol. None for the usual encoding.</summary>
+    public unsafe KittyKeyboardFlags KeyboardFlags
+    {
+        get
+        {
+            byte flags = 0;
+            lock (_terminalGate)
+            {
+                if (_disposed != 0 || Ghostty.TerminalGet(_terminal, Ghostty.TerminalDataKittyKeyboardFlags, &flags) != Ghostty.Success) return KittyKeyboardFlags.None;
+            }
+            return (KittyKeyboardFlags)flags;
+        }
+    }
+
     public void Resize(int columns, int rows, int cellWidthPixels, int cellHeightPixels)
     {
-        if (columns == _columns && rows == _rows) return;
-        _columns = columns;
-        _rows = rows;
+        // The size of a cell in pixels matters even when the grid stays the same: a picture placed by cells is sized
+        // from it, and the first resize of a new session usually keeps the grid it was made with.
+        bool gridChanged = columns != _columns || rows != _rows;
+        if (!gridChanged && cellWidthPixels == _cellWidthPixels && cellHeightPixels == _cellHeightPixels) return;
+        (_columns, _rows, _cellWidthPixels, _cellHeightPixels) = (columns, rows, cellWidthPixels, cellHeightPixels);
 
         lock (_terminalGate)
         {
             if (_disposed != 0) return;
             _contentVersion++;
             Check(Ghostty.TerminalResize(_terminal, (ushort)columns, (ushort)rows, (uint)cellWidthPixels, (uint)cellHeightPixels));
+            if (gridChanged) _cast?.Resize(columns, rows);
         }
 
-        _ = ResizeTransportAsync(columns, rows);
+        // The other side only hears about the grid; pixels are this computer's own business.
+        if (gridChanged) _ = ResizeTransportAsync(columns, rows);
         SignalChanged();
     }
+
+    private int _cellWidthPixels;
+    private int _cellHeightPixels;
 
     private async Task ResizeTransportAsync(int columns, int rows)
     {
@@ -453,6 +501,28 @@ public sealed partial class TerminalSession : IAsyncDisposable
             {
                 _log = new OutputLog(path);
             }
+        }
+    }
+
+    /// <summary>
+    /// Starts recording the terminal as an asciicast, or stops if it was already recording. Returns the file of a
+    /// recording that just stopped, or null when one started.
+    /// </summary>
+    public string? ToggleRecording(string path, string? title)
+    {
+        lock (_terminalGate)
+        {
+            if (_disposed != 0) return null;
+
+            if (_cast is { } running)
+            {
+                running.Dispose();
+                _cast = null;
+                return running.Path;
+            }
+
+            _cast = new CastRecorder(path, _columns, _rows, title);
+            return null;
         }
     }
 
@@ -835,6 +905,39 @@ public sealed partial class TerminalSession : IAsyncDisposable
     }
 
     /// <summary>The text of one row on screen, a string per cell. Null if there is no such row.</summary>
+    // A link longer than this is not one anybody means to click.
+    private const int LongestHyperlink = 8192;
+
+    /// <summary>
+    /// The address the program gave a cell with an OSC 8 hyperlink, as "ls --hyperlink" and many tools write them.
+    /// Null where there is none. Whether it is safe to open is for the caller to decide: the program chose it.
+    /// </summary>
+    public unsafe string? HyperlinkAt(int column, int row)
+    {
+        lock (_terminalGate)
+        {
+            if (_disposed != 0 || column < 0 || row < 0) return null;
+
+            var point = new Ghostty.Point { Tag = Ghostty.PointTagViewport, X = (ushort)column, Y = (uint)row };
+            Ghostty.GridRef reference = default;
+            if (Ghostty.TerminalGridRef(_terminal, point, &reference) != Ghostty.Success) return null;
+
+            byte* buffer = stackalloc byte[LongestHyperlink];
+            nuint written = 0;
+            try
+            {
+                if (Ghostty.GridRefHyperlinkUri(&reference, buffer, LongestHyperlink, &written) != Ghostty.Success || written == 0) return null;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // An engine built before hyperlinks could be read. Links are then found in the text alone.
+                return null;
+            }
+
+            return Encoding.UTF8.GetString(buffer, (int)written);
+        }
+    }
+
     public string[]? RowCells(int row)
     {
         string[]? cells = null;
@@ -1039,6 +1142,7 @@ public sealed partial class TerminalSession : IAsyncDisposable
         lock (_terminalGate)
         {
             _log?.Dispose();
+            _cast?.Dispose();
             if (_search != 0) Ghostty.SearchFree(_search);
             Ghostty.TrackedGridRefFree(_outputStart);
             Ghostty.TrackedGridRefFree(_lastOutputStart);

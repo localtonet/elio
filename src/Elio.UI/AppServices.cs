@@ -25,10 +25,19 @@ public static class AppServices
     /// </summary>
     public static Func<Task<string?>>? ScanQrCode { get; set; }
 
-    /// <summary>Raised when the system hands Elio a link it was asked to open: a QR code read by the phone's own camera.</summary>
-    public static event Action<string>? LinkOpened;
+    /// <summary>
+    /// Whether ssh:// and elio:// links open in Elio, as the operating system has it. Set by a desktop head that can
+    /// change it; null where it cannot, as on a phone or a Mac, whose app bundle says so itself.
+    /// </summary>
+    public static ILinkRegistration? Links { get; set; }
 
-    private static string? _pendingLink;
+    /// <summary>
+    /// Raised when Elio is asked to open something: a link the system hands over, such as a QR code read by the
+    /// phone's own camera or an ssh:// link, or what Elio was started with on the command line.
+    /// </summary>
+    public static event Action<LaunchRequest>? LaunchRequested;
+
+    private static LaunchRequest? _pendingLaunch;
 
     /// <summary>
     /// Asks the device to check who is holding it, with its fingerprint, face or passcode, showing the given reason.
@@ -54,7 +63,7 @@ public static class AppServices
         // A link that came in while locked was kept back, and is due now.
         appLock.Changed += () =>
         {
-            if (!appLock.IsLocked && TakePendingLink() is { } link) OpenLink(link);
+            if (!appLock.IsLocked && TakePendingLaunch() is { } request) Launch(request);
         };
         return appLock;
     }
@@ -66,20 +75,24 @@ public static class AppServices
     public static void AppCameToForeground() => Lock.CameToForeground();
 
     /// <summary>Takes a link from the system. One that arrives before the window is up, or while Elio is locked, waits.</summary>
-    public static void OpenLink(string link)
+    public static void OpenLink(string link) => Launch(LaunchRequest.FromLinkText(link));
+
+    /// <summary>Takes a request to open something. One that arrives before the window is up, or while Elio is locked, waits.</summary>
+    public static void Launch(LaunchRequest request)
     {
-        if (!Lock.IsLocked && LinkOpened is { } opened) opened(link);
-        else _pendingLink = link;
+        if (request.Kind == LaunchKind.NewTab && LaunchRequested is null) return;
+        if (!Lock.IsLocked && LaunchRequested is { } launched) launched(request);
+        else _pendingLaunch = request;
     }
 
-    /// <summary>The link that arrived before anything was listening, once. Nothing while Elio is locked: it is handed over at unlocking.</summary>
-    public static string? TakePendingLink()
+    /// <summary>The request that arrived before anything was listening, once. Nothing while Elio is locked: it is handed over at unlocking.</summary>
+    public static LaunchRequest? TakePendingLaunch()
     {
         if (Lock.IsLocked) return null;
 
-        string? link = _pendingLink;
-        _pendingLink = null;
-        return link;
+        LaunchRequest? request = _pendingLaunch;
+        _pendingLaunch = null;
+        return request;
     }
 
     /// <summary>Replaces opening a web page, in tests.</summary>
@@ -143,6 +156,12 @@ public static class AppServices
     {
         if (Settings.FollowSystemTheme) SettingsChanged?.Invoke();
     }
+
+    /// <summary>
+    /// A watcher for the words in Settings under "Tell me when the output shows", or null when there are none. Each
+    /// terminal gets its own, since a watcher keeps the line it is in the middle of.
+    /// </summary>
+    public static OutputWatcher? Triggers => Settings.Triggers.Count == 0 ? null : new OutputWatcher(Settings.Triggers);
 
     public static void SaveSettings()
     {
@@ -249,7 +268,14 @@ public static class AppServices
     /// <summary>The layouts saved under a name. One copy for every window, kept on this device only.</summary>
     public static WorkspaceFile Workspaces { get; } = WorkspaceStore.Load();
 
-    public static void SaveWorkspaces() => WorkspaceStore.Save(Workspaces);
+    /// <summary>Raised when a workspace was saved, renamed or deleted, here or by sync.</summary>
+    public static event Action? WorkspacesChanged;
+
+    public static void SaveWorkspaces()
+    {
+        WorkspaceStore.Save(Workspaces);
+        WorkspacesChanged?.Invoke();
+    }
 
     /// <summary>Records the tabs open in every window, so a restart can bring them back.</summary>
     public static void SaveLayout()
@@ -259,4 +285,16 @@ public static class AppServices
         LayoutStore.Save(layout);
         SaveHistory();
     }
+}
+
+/// <summary>The operating system's record of which program opens ssh:// and elio:// links.</summary>
+public interface ILinkRegistration
+{
+    /// <summary>Whether both kinds of link open in this copy of Elio.</summary>
+    bool IsRegistered { get; }
+
+    void Register();
+
+    /// <summary>Takes back what <see cref="Register"/> wrote, and nothing another program wrote.</summary>
+    void Unregister();
 }

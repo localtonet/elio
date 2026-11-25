@@ -50,6 +50,242 @@ public sealed partial class DialogHost
         return Frame(L.T("Compress"), body, cancel, ok);
     });
 
+    /// <summary>Asks for new permissions, and for a folder whether what is in it is to change too.</summary>
+    /// <param name="what">What is being changed, as the user will recognise it: a name in quotes, or how many.</param>
+    /// <param name="current">The digits it has now, such as 644, or empty when that is not known or not the same for all.</param>
+    /// <param name="offerContents">A folder is among what was chosen, so its contents can be changed as well.</param>
+    /// <returns>The permissions and how far they reach, or null if cancelled.</returns>
+    public Task<PermissionChoice?> AskPermissionsAsync(string what, string current, bool offerContents) => Enqueue<PermissionChoice?>(null, result =>
+    {
+        TextBox digits = Input(current, tag: "permission-digits");
+        var meaning = new TextBlock { FontSize = 12, FontFamily = ElioStyle.CodeFont, Foreground = ElioColors.TextMuted, Tag = "permission-letters" };
+        CheckBox inside = Check(L.T("Apply to what is inside the folder too"), false, "permission-recurse");
+
+        // Each dialog's own group, so that two of them never share their choice.
+        string group = "permission-scope-" + Guid.NewGuid().ToString("N");
+        RadioButton Scope(string text, string tag, bool chosen) => new() { Content = text, GroupName = group, IsChecked = chosen, Foreground = ElioColors.Text, Tag = tag };
+        RadioButton everything = Scope(L.T("To the folder and everything in it"), "permission-everything", true);
+        RadioButton files = Scope(L.T("Only to the files in it"), "permission-files", false);
+        RadioButton folders = Scope(L.T("Only to the folder and the folders in it"), "permission-folders", false);
+        var scopes = new StackPanel
+        {
+            Spacing = 6,
+            Margin = new Thickness(26, 0, 0, 0),
+            Children =
+            {
+                everything,
+                files,
+                folders,
+                new TextBlock { Text = L.T("Links inside are left as they are, and not followed."), FontSize = 12, Foreground = ElioColors.TextMuted, TextWrapping = TextWrapping.Wrap },
+            },
+        };
+
+        Button ok = MakeButton(L.T("Apply"), primary: true);
+        Button cancel = MakeButton(L.T("Cancel"), primary: false);
+
+        void Update()
+        {
+            int? mode = PermissionBits.Parse(digits.Text);
+            meaning.Text = mode is int bits ? PermissionBits.Letters(bits) : L.T("Permission must be three digits, for example 644.");
+            meaning.Foreground = mode is null && (digits.Text?.Trim().Length ?? 0) > 0 ? ElioColors.Danger : ElioColors.TextMuted;
+            scopes.IsEnabled = inside.IsChecked == true;
+            ok.IsEnabled = mode is not null;
+        }
+
+        void Submit()
+        {
+            if (PermissionBits.Parse(digits.Text) is not int mode) return;
+
+            PermissionScope scope = inside.IsChecked != true ? PermissionScope.OnlyThis
+                : files.IsChecked == true ? PermissionScope.OnlyFiles
+                : folders.IsChecked == true ? PermissionScope.OnlyFolders
+                : PermissionScope.Everything;
+            result.TrySetResult(new PermissionChoice(mode, scope));
+        }
+
+        digits.TextChanged += (_, _) => Update();
+        inside.IsCheckedChanged += (_, _) => Update();
+        ok.Click += (_, _) => Submit();
+        cancel.Click += (_, _) => result.TrySetResult(null);
+        SubmitOnEnter(digits, Submit);
+        FocusWhenShown(digits);
+        Update();
+
+        var body = new StackPanel { Spacing = 10, Children = { Paragraph(what), Field(L.T("Numeric permission (example: 644)"), digits), meaning } };
+        if (offerContents)
+        {
+            body.Children.Add(inside);
+            body.Children.Add(scopes);
+        }
+
+        return Frame(L.T("Permissions"), body, cancel, ok);
+    });
+
+    /// <returns>The limits in KB a second, 0 meaning none, or null if cancelled.</returns>
+    public Task<(int DownloadKb, int UploadKb)?> EditSpeedLimitsAsync(int downloadKb, int uploadKb) => Enqueue<(int, int)?>(null, result =>
+    {
+        // A hundred gigabytes a second: past anything a link carries, and far from where the bytes a second would overflow.
+        const int MostKb = 100 * 1024 * 1024;
+
+        static string Shown(int kb) => kb > 0 ? kb.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
+
+        // Empty is no limit, like 0. Null for what is not a whole number of KB.
+        static int? Read(TextBox box)
+        {
+            string text = box.Text?.Trim() ?? string.Empty;
+            if (text.Length == 0) return 0;
+            return int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int kb) && kb <= MostKb ? kb : null;
+        }
+
+        TextBox down = Input(Shown(downloadKb), tag: "limit-download");
+        TextBox up = Input(Shown(uploadKb), tag: "limit-upload");
+        down.PlaceholderText = up.PlaceholderText = L.T("No limit");
+        var problem = new TextBlock { Text = L.T("Write a whole number of KB a second, or leave it empty for no limit."), FontSize = 12, Foreground = ElioColors.Danger, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+        Button ok = MakeButton(L.T("Apply"), primary: true);
+        Button cancel = MakeButton(L.T("Cancel"), primary: false);
+
+        void Submit()
+        {
+            if (Read(down) is int downKb && Read(up) is int upKb) result.TrySetResult((downKb, upKb));
+            else problem.IsVisible = true;
+        }
+
+        ok.Click += (_, _) => Submit();
+        cancel.Click += (_, _) => result.TrySetResult(null);
+        SubmitOnEnter(down, Submit);
+        SubmitOnEnter(up, Submit);
+        FocusWhenShown(down);
+
+        var body = new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                Field(L.T("Downloads, in KB a second"), down),
+                Field(L.T("Uploads, in KB a second"), up),
+                new TextBlock
+                {
+                    Text = L.T("The limit is shared by all the transfers going that way, in every file tab. A copy between two servers counts as both, and goes by the lower one."),
+                    FontSize = 12,
+                    Foreground = ElioColors.TextMuted,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                problem,
+            },
+        };
+
+        return Frame(L.T("Speed limit"), body, cancel, ok);
+    });
+
+    /// <summary>
+    /// Shows what synchronising the two sides would copy, and lets the user choose the way it goes before anything happens.
+    /// </summary>
+    /// <param name="leftName">What the left side is, such as "this computer" or a server's name.</param>
+    /// <param name="plan">Works out what would be copied for a direction, and whether files newer on the other side are replaced.</param>
+    /// <returns>The plan to carry out, or null if cancelled.</returns>
+    public Task<SyncPlan?> AskSyncAsync(string leftName, string rightName, Func<SyncDirection, bool, SyncPlan> plan) => Enqueue<SyncPlan?>(null, result =>
+    {
+        const int ShownRows = 60;
+
+        var direction = new ComboBox
+        {
+            ItemsSource = new[]
+            {
+                L.T("From {0} to {1}", leftName, rightName),
+                L.T("From {0} to {1}", rightName, leftName),
+                L.T("Both ways: the newer file wins"),
+            },
+            SelectedIndex = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Tag = "sync-direction",
+        };
+        CheckBox replaceNewer = Check(L.T("Also replace files that are newer on the other side"), false, "sync-replace-newer");
+        var summary = new TextBlock { FontSize = 13, Foreground = ElioColors.Text, TextWrapping = TextWrapping.Wrap, Tag = "sync-summary" };
+        var preview = new StackPanel { Spacing = 3, Tag = "sync-preview" };
+        var note = new TextBlock { FontSize = 12, Foreground = ElioColors.TextMuted, TextWrapping = TextWrapping.Wrap };
+        Button ok = MakeButton(L.T("Synchronise"), primary: true);
+        Button cancel = MakeButton(L.T("Cancel"), primary: false);
+        SyncPlan current = plan(SyncDirection.LeftToRight, false);
+
+        string Reason(SkipReason reason) => reason switch
+        {
+            SkipReason.NewerOnTheOtherSide => L.T("newer on the other side"),
+            SkipReason.CannotTellWhichIsNewer => L.T("same time, different size: which is newer cannot be told"),
+            SkipReason.NamesDifferInCase => L.T("the names differ only in upper and lower case"),
+            SkipReason.NamesClashByCase => L.T("names that differ only in case would take each other's place"),
+            SkipReason.FileAndFolder => L.T("a file on one side, a folder on the other"),
+            SkipReason.Unreadable => L.T("could not be read"),
+            _ => L.T("a folder, which is only copied when subfolders are included"),
+        };
+
+        TextBlock Line(string text, IBrush brush) => new() { Text = text, FontSize = 12, Foreground = brush, TextTrimming = TextTrimming.CharacterEllipsis };
+
+        void Recompute()
+        {
+            var chosen = (SyncDirection)Math.Max(0, direction.SelectedIndex);
+            replaceNewer.IsVisible = chosen != SyncDirection.BothWays;
+            current = plan(chosen, replaceNewer.IsVisible && replaceNewer.IsChecked == true);
+
+            bool right = current.Copies.Any(c => c.ToRight);
+            bool left = current.Copies.Any(c => !c.ToRight);
+            summary.Text = (right, left) switch
+            {
+                (true, true) => L.T("{0} files ({1}) would be copied to {2}, and {3} files ({4}) to {5}.", current.FilesToRight, FileText.Size(current.BytesToRight), rightName, current.FilesToLeft, FileText.Size(current.BytesToLeft), leftName),
+                (true, false) => L.T("{0} files ({1}) would be copied to {2}.", current.FilesToRight, FileText.Size(current.BytesToRight), rightName),
+                (false, true) => L.T("{0} files ({1}) would be copied to {2}.", current.FilesToLeft, FileText.Size(current.BytesToLeft), leftName),
+                _ => L.T("Nothing would be copied."),
+            };
+
+            // What would be copied first, then what is left as it is and why.
+            preview.Children.Clear();
+            foreach (SyncCopy copy in current.Copies.Take(ShownRows))
+            {
+                string size = copy.Item.IsDirectory ? L.T("folder, {0} files, {1}", copy.Files, FileText.Size(copy.Bytes)) : FileText.Size(copy.Bytes);
+                preview.Children.Add(Line($"{(copy.ToRight ? "→" : "←")}  {copy.Item.RelativePath}   {size}", ElioColors.Text));
+            }
+
+            int room = Math.Max(0, ShownRows - preview.Children.Count);
+            foreach (SyncSkip skip in current.Skipped.Take(room)) preview.Children.Add(Line($"·  {skip.Item.RelativePath}   {Reason(skip.Reason)}", ElioColors.TextMuted));
+
+            int more = current.Copies.Count + current.Skipped.Count - preview.Children.Count;
+            if (more > 0) preview.Children.Add(new TextBlock { Text = L.T("... and {0} more", more), FontSize = 12, Foreground = ElioColors.TextFaint });
+
+            string skipped = current.Skipped.Count > 0 ? L.T("{0} differences are left as they are.", current.Skipped.Count) + " " : string.Empty;
+            string kept = current.Untouched > 0 ? L.T("{0} items that only the side being copied to has stay there.", current.Untouched) + " " : string.Empty;
+            note.Text = skipped + kept + L.T("Nothing is deleted. A file that is replaced is only swapped for the new one once that has fully arrived.");
+            ok.IsEnabled = current.Copies.Count > 0;
+        }
+
+        direction.SelectionChanged += (_, _) => Recompute();
+        replaceNewer.IsCheckedChanged += (_, _) => Recompute();
+        ok.Click += (_, _) =>
+        {
+            if (current.Copies.Count > 0) result.TrySetResult(current);
+        };
+        cancel.Click += (_, _) => result.TrySetResult(null);
+        Recompute();
+
+        Control frame = Frame(
+            L.T("Synchronise"),
+            new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    Field(L.T("Copy"), direction),
+                    replaceNewer,
+                    summary,
+                    new ScrollViewer { MaxHeight = 300, Margin = ScrollOutset, Content = new StackPanel { Margin = ScrollInset, Children = { preview } } },
+                    note,
+                },
+            },
+            cancel,
+            ok);
+
+        if (frame is Border card) card.Width = 580;
+        return frame;
+    });
+
     /// <summary>
     /// Asks how several files are to be renamed, showing what each would be called as the answer is changed.
     /// </summary>

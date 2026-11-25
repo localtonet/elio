@@ -47,6 +47,7 @@ DEPS=$(find "$WORK/deps" -mindepth 1 -maxdepth 1 -type d | head -1)
 target_of() {
     case "$1" in
         win-x64) echo x86_64-windows-gnu ;;
+        win-arm64) echo aarch64-windows-gnu ;;
         linux-x64) echo x86_64-linux-gnu.2.28 ;;
         linux-arm64) echo aarch64-linux-gnu.2.28 ;;
         android-arm64) echo aarch64-linux-android.24 ;;
@@ -56,7 +57,7 @@ target_of() {
     esac
 }
 
-[ $# -gt 0 ] || set -- win-x64 linux-x64 linux-arm64 android-arm64 android-arm android-x64
+[ $# -gt 0 ] || set -- win-x64 win-arm64 linux-x64 linux-arm64 android-arm64 android-arm android-x64
 
 failed=""
 for rid in "$@"; do
@@ -73,13 +74,16 @@ for rid in "$@"; do
 
     out=$ROOT/out/$rid
     rm -rf "$out"
-    if [ "$rid" = win-x64 ]; then
-        mkdir -p "$out/bin"
-        cp "$prefix/bin/ghostty-vt.dll" "$out/bin/"
-    else
-        mkdir -p "$out/lib"
-        cp -L "$prefix/lib/libghostty-vt.so" "$out/lib/libghostty-vt.so"
-    fi
+    case "$rid" in
+        win-*)
+            mkdir -p "$out/bin"
+            cp "$prefix/bin/ghostty-vt.dll" "$out/bin/"
+            ;;
+        *)
+            mkdir -p "$out/lib"
+            cp -L "$prefix/lib/libghostty-vt.so" "$out/lib/libghostty-vt.so"
+            ;;
+    esac
     ls -l "$out"/*/
 done
 

@@ -21,6 +21,7 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        CrashLog.Install();
 
         // A phone has no monospaced font that can be asked for by name, and code in the editor needs one. See ElioStyle.CodeFont.
         FontManager.Current.AddFontCollection(new EmbeddedFontCollection(new Uri("fonts:ElioMono"), new Uri("avares://Elio.UI/Fonts")));
@@ -32,6 +33,14 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        // Many buttons show only an icon and say what they do in a tooltip. A screen reader is given the same words
+        // as the button's name, for every such button wherever it is made.
+        Avalonia.Controls.Control.LoadedEvent.AddClassHandler<Avalonia.Controls.Button>((button, _) =>
+        {
+            if (Avalonia.Automation.AutomationProperties.GetName(button) is null && Avalonia.Controls.ToolTip.GetTip(button) is string tip && tip.Length > 0)
+                Avalonia.Automation.AutomationProperties.SetName(button, tip);
+        });
+
         if (PlatformSettings is { } platform) platform.ColorValuesChanged += (_, _) => AppServices.SystemAppearanceChanged();
 
         // The terminal engine leaves reading PNG files to the app, which has Skia for it. Without the engine, which is
@@ -53,8 +62,9 @@ public partial class App : Application
         AppServices.Lock.Start();
 
         // On an iPhone a link opened from outside, such as the sync QR code read by the phone's own camera, comes
-        // in this way. Android hands its links to the activity instead.
-        if (OperatingSystem.IsIOS() && this.TryGetFeature<Avalonia.Controls.ApplicationLifetimes.IActivatableLifetime>() is { } activation)
+        // in this way, and on a Mac an ssh:// or elio:// link clicked elsewhere. Android hands its links to the
+        // activity instead, and Windows and Linux start Elio with the link as its argument.
+        if ((OperatingSystem.IsIOS() || OperatingSystem.IsMacOS()) && this.TryGetFeature<Avalonia.Controls.ApplicationLifetimes.IActivatableLifetime>() is { } activation)
         {
             activation.Activated += (_, e) =>
             {
@@ -73,6 +83,8 @@ public partial class App : Application
                 AnnounceWindow(window);
                 window.View.RestoreSession();
                 UpdateCheck.Start(window.View.Workspace);
+                if (CrashLog.TakeUnseen() is string report)
+                    window.View.Workspace.ShowNotice(Elio.Core.L.T("Elio closed unexpectedly last time. A report was saved on this computer, and nothing was sent anywhere: {0}", report));
                 break;
             case IActivityApplicationLifetime activity:
                 activity.MainViewFactory = () => new MainView();

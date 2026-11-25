@@ -257,6 +257,9 @@ public sealed class TerminalView : Control
             if (key is TerminalKey.Enter or TerminalKey.NumPadEnter) TrackKey(key, mods);
             ForEachTarget(session => sent |= session.SendKey(key, mods, 0, null));
             if (sent && key is not (TerminalKey.Enter or TerminalKey.NumPadEnter)) TrackKey(key, mods);
+
+            // A key on screen is let go as soon as it is tapped, which a program that asked for releases is told.
+            ForEachTarget(session => session.SendKey(key, mods, 0, null, TerminalKeyAction.Release));
         }
 
         Focus();
@@ -779,7 +782,10 @@ public sealed class TerminalView : Control
     private Uri? LinkAt(Point point)
     {
         var (column, row) = CellAt(point);
-        return _session!.RowCells(row) is string[] cells ? TerminalLinks.At(cells, column) : null;
+
+        // A link the program marked as one (OSC 8) comes first; it may sit on text that is not an address at all.
+        if (TerminalLinks.FromHyperlink(_session!.HyperlinkAt(column, row)) is Uri marked) return marked;
+        return _session.RowCells(row) is string[] cells ? TerminalLinks.At(cells, column) : null;
     }
 
     private void ScrollWhileDragging()
@@ -965,6 +971,23 @@ public sealed class TerminalView : Control
 
         if (_mouseCaptured) ReportMouse(MouseAction.Motion, _mouseButton, e.KeyModifiers, position, anyPressed: true);
         else if (_session.MouseTracking) ReportMouse(MouseAction.Motion, MouseButton.None, e.KeyModifiers, position, anyPressed: false);
+
+        ShowLinkUnderPointer(position, e.KeyModifiers);
+    }
+
+    private Uri? _hoveredLink;
+
+    // With Ctrl held, a link shows the hand and says where it goes. A program can put an OSC 8 link on any text, so
+    // the address is shown before it is clicked, not only after.
+    private void ShowLinkUnderPointer(Point position, KeyModifiers modifiers)
+    {
+        Uri? link = modifiers.HasFlag(KeyModifiers.Control) ? LinkAt(position) : null;
+        if (link == _hoveredLink) return;
+
+        _hoveredLink = link;
+        Cursor = new Cursor(link is null ? StandardCursorType.Ibeam : StandardCursorType.Hand);
+        ToolTip.SetTip(this, link?.AbsoluteUri);
+        ToolTip.SetIsOpen(this, link is not null);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -1037,6 +1060,7 @@ public sealed class TerminalView : Control
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
+        _held.Clear();
         _blinkTimer.Stop();
         _cursorOn = true;
         InvalidateVisual();
@@ -1137,9 +1161,17 @@ public sealed class TerminalView : Control
 
         // Plain characters arrive through text input, which also covers IMEs and dead keys.
         // AltGr is reported as Ctrl+Alt on Windows and produces a normal character too.
-        if (printable && ctrl == alt) return;
+        // A program that asked for every key as an escape code (Kitty keyboard flag 8) gets plain characters that way instead.
+        bool everyKey = !ctrl && _session.KeyboardFlags.HasFlag(KittyKeyboardFlags.ReportAllKeys);
+        bool known = KeyMap.TryGet(e.PhysicalKey, e.Key, out TerminalKey key);
+        if (printable && ctrl == alt && !everyKey)
+        {
+            // Its release is still reported, to a program that asked to hear of releases.
+            if (known) _held.Add(key);
+            return;
+        }
 
-        if (!KeyMap.TryGet(e.PhysicalKey, e.Key, out TerminalKey key)) return;
+        if (!known) return;
         TerminalMods mods = KeyMap.Mods(e.KeyModifiers);
         if (TakeSuggestion(key, mods))
         {
@@ -1151,12 +1183,30 @@ public sealed class TerminalView : Control
         string? text = printable ? e.KeySymbol : null;
         bool sent = false;
 
+        // A key that comes again before it was let go is repeating. Only a program that asked hears the difference.
+        TerminalKeyAction action = _held.Add(key) ? TerminalKeyAction.Press : TerminalKeyAction.Repeat;
+
         // Enter is looked at before it is sent, while the line it ends is still the one on screen. A key
         // that sends nothing, such as Shift on its own, changes nothing about the line.
         bool enter = key is TerminalKey.Enter or TerminalKey.NumPadEnter;
         if (enter) TrackKey(key, mods);
-        ForEachTarget(session => sent |= session.SendKey(key, mods, unshifted, text));
+        ForEachTarget(session => sent |= session.SendKey(key, mods, unshifted, text, action));
         if (sent && !enter) TrackKey(key, mods);
+        e.Handled = sent;
+    }
+
+    // Keys pressed here and not yet let go. A program that asked for releases (Kitty keyboard flag 2) is told of them.
+    private readonly HashSet<TerminalKey> _held = [];
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (_session is null || !KeyMap.TryGet(e.PhysicalKey, e.Key, out TerminalKey key) || !_held.Remove(key)) return;
+
+        bool sent = false;
+        TerminalMods mods = KeyMap.Mods(e.KeyModifiers);
+        uint unshifted = KeyMap.Unshifted(e.Key, key);
+        ForEachTarget(session => sent |= session.SendKey(key, mods, unshifted, null, TerminalKeyAction.Release));
         e.Handled = sent;
     }
 

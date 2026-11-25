@@ -74,6 +74,22 @@ public interface IFileSource
     Task CompressAsync(string folder, IReadOnlyList<string> names, string archiveName, ArchiveKind kind, CancellationToken cancellation) => throw new NotSupportedException();
 
     Task<ContentSearchResult> SearchContentAsync(string folder, string query, bool ignoreCase, bool regex, int limit, CancellationToken cancellation) => throw new NotSupportedException();
+
+    /// <summary>Whether permissions can be changed here. Windows has none of this kind, so this computer cannot there.</summary>
+    bool CanChangeMode => false;
+
+    /// <summary>
+    /// Sets the permissions of one file or folder to nine bits, such as 0b110_100_100 for 644. A folder keeps its set-user
+    /// and set-group bits, as <c>chmod</c> leaves them. A link is changed through, as <c>chmod</c> does: what it points at changes.
+    /// </summary>
+    Task ChangeModeAsync(FileRow row, int mode, CancellationToken cancellation) => throw new NotSupportedException();
+
+    /// <summary>
+    /// Sets the permissions of a folder and of everything in it in one go, where that is far quicker than one at a time.
+    /// No link inside is followed.
+    /// </summary>
+    /// <returns>What could not be changed, one line each; or null when it cannot be done in one go here, and nothing was changed.</returns>
+    Task<IReadOnlyList<string>?> ChangeModeTreeAsync(FileRow folder, int mode, CancellationToken cancellation) => Task.FromResult<IReadOnlyList<string>?>(null);
 }
 
 /// <summary>Files on this computer.</summary>
@@ -234,6 +250,17 @@ public sealed class LocalFileSource : IFileSource
         var info = new FileInfo(path);
         return Task.FromResult<(long, DateTime)?>(info.Exists ? (info.Length, info.LastWriteTimeUtc) : null);
     }
+
+    public bool CanChangeMode => !OperatingSystem.IsWindows();
+
+    public Task ChangeModeAsync(FileRow row, int mode, CancellationToken cancellation) => Task.Run(() =>
+    {
+        if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException(L.T("Windows has no permissions of this kind."));
+
+        // A folder keeps its set-user and set-group bits, which say who owns what is made in it, as chmod leaves them.
+        UnixFileMode kept = row.IsDirectory ? File.GetUnixFileMode(row.Path) & (UnixFileMode.SetUser | UnixFileMode.SetGroup) : UnixFileMode.None;
+        File.SetUnixFileMode(row.Path, (UnixFileMode)(mode & 0b111_111_111) | kept);
+    }, cancellation);
 
     public Task ExtractAsync(FileRow archive, string targetFolder, CancellationToken cancellation) => Task.Run(() =>
     {
@@ -498,8 +525,27 @@ public sealed class RemoteFileSource(Func<CancellationToken, Task<SftpConnection
     public async Task DeleteAsync(FileRow row, CancellationToken cancellation) =>
         await (await connection(cancellation)).DeleteAsync(row.Remote!, cancellation);
 
-    public async Task ChangeModeAsync(FileRow row, short mode, CancellationToken cancellation) =>
-        await (await connection(cancellation)).ChangeModeAsync(row.Path, mode, cancellation);
+    public bool CanChangeMode => true;
+
+    // A row found by a search through what files say has no listing behind it, and is changed by its path.
+    public async Task ChangeModeAsync(FileRow row, int mode, CancellationToken cancellation) =>
+        await (await connection(cancellation)).ChangeModeAsync(row.Remote ?? new RemoteEntry(row.Name, row.Path, row.Size, row.ModifiedUtc, row.IsDirectory, row.IsLink, row.Permissions), mode, cancellation);
+
+    public async Task<IReadOnlyList<string>?> ChangeModeTreeAsync(FileRow folder, int mode, CancellationToken cancellation)
+    {
+        if (run is null || folder.IsLink) return null;
+
+        CommandResult result = await run(PermissionCommand.Build(folder.Path, mode), cancellation).ConfigureAwait(false);
+        cancellation.ThrowIfCancellationRequested();
+
+        // A server that would not run it, or has no chmod, is gone through over SFTP instead. Nothing was changed by this.
+        if (result.Failure is not null || result.ExitCode is null or 126 or 127) return null;
+        if (result.ExitCode == 0) return [];
+
+        // chmod goes on past what it cannot change, and says so for each on a line of its own.
+        string[] lines = result.Error.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return lines.Length > 0 ? lines : [Complaint(result)];
+    }
 
     public async Task CreateFileAsync(string path, CancellationToken cancellation) =>
         await (await connection(cancellation)).CreateFileAsync(path, cancellation);

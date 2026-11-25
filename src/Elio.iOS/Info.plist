@@ -44,6 +44,14 @@
         <string>elio</string>
       </array>
     </dict>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>sh.elio.app.ssh</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>ssh</string>
+      </array>
+    </dict>
   </array>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Elio connects to the servers and devices you add, which may be on your own network.</string>

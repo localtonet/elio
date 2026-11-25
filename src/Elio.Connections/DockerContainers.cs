@@ -15,7 +15,7 @@ public static class DockerContainers
     private const string ListFormat = "{{.Names}}\t{{.Image}}\t{{.Status}}";
 
     // bash where the image has it, sh where it does not.
-    private const string ShellCommand = "sh -c \"if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi\"";
+    internal const string ShellCommand = "sh -c \"if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi\"";
 
     /// <summary>Asks Docker what is running.</summary>
     /// <exception cref="IOException">Docker is not installed, is not running, or did not answer.</exception>
@@ -90,7 +90,7 @@ public static class DockerContainers
             string name = fields[0].Trim();
 
             // The name goes onto a command line, so anything Docker would not have allowed is not trusted.
-            if (name.Length == 0 || !name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '-')) continue;
+            if (!IsName(name)) continue;
 
             containers.Add(new HostEntry
             {
@@ -105,4 +105,11 @@ public static class DockerContainers
 
         return containers;
     }
+
+    /// <summary>
+    /// Whether a container's name is one Docker allows: letters, digits, underscores, dots and dashes, starting with a
+    /// letter or digit, so that it can never be read as an option.
+    /// </summary>
+    internal static bool IsName(string name) =>
+        name.Length > 0 && char.IsAsciiLetterOrDigit(name[0]) && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '-');
 }

@@ -34,25 +34,42 @@ public sealed class TransferListView : UserControl
     private readonly TextBlock _summary = new() { FontSize = 12, FontWeight = FontWeight.SemiBold, Foreground = ElioColors.Text, VerticalAlignment = VerticalAlignment.Center, Tag = "transfers-summary" };
 
     private readonly string[]? _servers;
+    private readonly DialogHost? _dialogs;
+    private readonly Button _limit;
 
-    public TransferListView(TransferQueue queue) : this(queue, null, null)
+    /// <param name="dialogs">Where the speed limit is asked for. Without it the limit is shown but cannot be changed here.</param>
+    public TransferListView(TransferQueue queue, DialogHost? dialogs = null) : this(queue, null, null, dialogs)
     {
     }
 
     /// <summary>A list for a queue with two servers, which says by name where each job is going.</summary>
-    public TransferListView(TransferQueue queue, string? first, string? second)
+    public TransferListView(TransferQueue queue, string? first, string? second, DialogHost? dialogs = null)
     {
         _queue = queue;
+        _dialogs = dialogs;
         _servers = first is null || second is null ? null : [first, second];
         _timer.Tick += (_, _) => Refresh();
         queue.Changed += () => Dispatcher.UIThread.Post(Sync);
 
+        // The limits saved last time hold from the first file tab on, before anything has been sent.
+        ApplySpeedLimits();
+
         var clear = new Button { Content = L.T("Clear finished"), FontSize = ElioStyle.SmallFontSize, Padding = new Thickness(9, 2), CornerRadius = new CornerRadius(6), Tag = "transfers-clear" };
         clear.Click += (_, _) => queue.RemoveFinished();
 
+        _limit = new Button { FontSize = ElioStyle.SmallFontSize, Padding = new Thickness(9, 2), CornerRadius = new CornerRadius(6), Margin = new Thickness(0, 0, 4, 0), Tag = "transfers-limit" };
+        ToolTip.SetTip(_limit, L.T("Speed limit"));
+        _limit.Click += (_, _) => _ = EditSpeedLimitAsync();
+        ShowSpeedLimit();
+
+        // Another file tab may have changed the limit while this one was out of sight.
+        AttachedToVisualTree += (_, _) => ShowSpeedLimit();
+
         var header = new DockPanel { Margin = new Thickness(12, 6, 8, 5) };
         DockPanel.SetDock(clear, Dock.Right);
+        DockPanel.SetDock(_limit, Dock.Right);
         header.Children.Add(clear);
+        header.Children.Add(_limit);
         header.Children.Add(_summary);
         DockPanel.SetDock(header, Dock.Top);
 
@@ -61,6 +78,39 @@ public sealed class TransferListView : UserControl
             Child = new DockPanel { Children = { header, new ScrollViewer { Content = _rows } } },
         };
         Sync();
+    }
+
+    /// <summary>Puts the speed limits from the settings into effect, for every transfer in every file tab.</summary>
+    public static void ApplySpeedLimits()
+    {
+        TransferThrottle.Downloads.BytesPerSecond = Math.Max(0, AppServices.Settings.DownloadLimitKb) * 1024L;
+        TransferThrottle.Uploads.BytesPerSecond = Math.Max(0, AppServices.Settings.UploadLimitKb) * 1024L;
+    }
+
+    private void ShowSpeedLimit()
+    {
+        int down = AppServices.Settings.DownloadLimitKb;
+        int up = AppServices.Settings.UploadLimitKb;
+        var parts = new List<string>();
+        if (down > 0) parts.Add("↓ " + FileText.Size(down * 1024L) + "/s");
+        if (up > 0) parts.Add("↑ " + FileText.Size(up * 1024L) + "/s");
+        _limit.Content = parts.Count == 0 ? L.T("No speed limit") : L.T("Speed limit: {0}", string.Join("  ", parts));
+    }
+
+    private async Task EditSpeedLimitAsync()
+    {
+        if (_dialogs is null) return;
+
+        AppSettings settings = AppServices.Settings;
+        if (await _dialogs.EditSpeedLimitsAsync(settings.DownloadLimitKb, settings.UploadLimitKb) is not (int down, int up)) return;
+
+        settings.DownloadLimitKb = down;
+        settings.UploadLimitKb = up;
+        AppServices.SaveSettings();
+
+        // Transfers that are running take the new limit at once, without starting over.
+        ApplySpeedLimits();
+        ShowSpeedLimit();
     }
 
     private void Sync()

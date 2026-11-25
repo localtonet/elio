@@ -76,6 +76,7 @@ public sealed class SyncCoordinator
     public void Start()
     {
         AppServices.LibraryChanged += Schedule;
+        AppServices.WorkspacesChanged += Schedule;
         AppServices.Vault.Changed += Schedule;
         if (IsOn) _ = SyncNowAsync();
     }
@@ -180,6 +181,8 @@ public sealed class SyncCoordinator
                 Identities = library.Identities,
                 Deleted = library.Deleted,
                 KnownHosts = AppServices.KnownHosts.Entries.ToDictionary(p => p.Key, p => p.Value),
+                Workspaces = AppServices.Workspaces.Workspaces,
+                WorkspacesDeleted = AppServices.Workspaces.Deleted,
             };
 
             if (AppServices.Settings.SyncSecrets)
@@ -208,6 +211,15 @@ public sealed class SyncCoordinator
                 library.Identities.AddRange(merged.Identities);
                 library.Deleted = merged.Deleted;
                 AppServices.SaveLibrary();
+
+                // Nothing about workspaces in what came back means nobody has synced any yet; the ones here stay.
+                if (merged.Workspaces is not null)
+                {
+                    AppServices.Workspaces.Workspaces.Clear();
+                    AppServices.Workspaces.Workspaces.AddRange(merged.Workspaces);
+                    AppServices.Workspaces.Deleted = merged.WorkspacesDeleted ?? [];
+                    AppServices.SaveWorkspaces();
+                }
 
                 AppServices.KnownHosts.Merge(merged.KnownHosts);
                 if (AppServices.Settings.SyncSecrets) AppServices.Vault.Replace(merged.Secrets, merged.SecretsDeleted);

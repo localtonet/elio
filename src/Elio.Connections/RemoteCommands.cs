@@ -266,6 +266,19 @@ public static class ContentSearchCommand
     }
 }
 
+/// <summary>Changes the permissions of a folder and of everything in it on the server itself, in one command.</summary>
+public static class PermissionCommand
+{
+    /// <summary>
+    /// <c>chmod -R</c> with the mode as three octal digits. GNU's, BusyBox's and the BSDs' all leave alone the links they
+    /// find below the folder rather than follow them, go on past what they cannot change and say so for each, and GNU's
+    /// keeps a folder's set-user and set-group bits, as the one-at-a-time way does too.
+    /// </summary>
+    /// <param name="mode">Nine bits, such as 0b111_101_101 for 755. Anything above them is left out.</param>
+    public static string Build(string folder, int mode) =>
+        $"chmod -R {(mode >> 6) & 7}{(mode >> 3) & 7}{mode & 7} {PosixQuote.Path(folder)}";
+}
+
 /// <summary>Copies on the server itself, which is much quicker than carrying the data there and back.</summary>
 public static class CopyCommand
 {

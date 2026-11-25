@@ -89,4 +89,45 @@ public partial class MainView : IPluginActions
 
     Task<string?> IPluginActions.PromptAsync(string plugin, string title, string? placeholder) =>
         Dispatcher.UIThread.InvokeAsync(() => Dialogs.AskTextAsync(plugin, title, placeholder, L.T("Continue")));
+
+    // What a plugin may know about the servers: what the server list shows, never a secret.
+    Task<IReadOnlyList<PluginServerListing>> IPluginActions.ListServersAsync(string plugin) => Dispatcher.UIThread.InvokeAsync(() =>
+    {
+        HostLibrary library = AppServices.Library;
+        return (IReadOnlyList<PluginServerListing>)library.Hosts
+            .OrderBy(h => h.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(h =>
+            {
+                ResolvedHost resolved = ConnectionResolver.Resolve(h, library);
+                return new PluginServerListing(
+                    h.Name,
+                    h.Kind.ToString().ToLowerInvariant(),
+                    h.Address,
+                    resolved.User.Length > 0 ? resolved.User : null,
+                    library.Groups.FirstOrDefault(g => g.Id == h.GroupId)?.Name,
+                    h.Tags.ToList());
+            })
+            .ToList();
+    }).GetTask();
+
+    Task<string?> IPluginActions.LastOutputAsync(string plugin) =>
+        Dispatcher.UIThread.InvokeAsync(() => Workspace.ActiveSession?.LastCommandOutput()).GetTask();
+
+    Task<bool> IPluginActions.ConnectAsync(string plugin, string server) => Dispatcher.UIThread.InvokeAsync(() =>
+    {
+        if (FindByName(server) is not HostEntry host) return false;
+        _ = Workspace.OpenAsync(host);
+        return true;
+    }).GetTask();
+
+    Task IPluginActions.ShowTextAsync(string plugin, string title, string text) =>
+        Dispatcher.UIThread.InvokeAsync(() => Dialogs.ShowTextAsync(title, text));
+
+    Task<int?> IPluginActions.ChooseAsync(string plugin, string title, IReadOnlyList<string> choices) => Dispatcher.UIThread.InvokeAsync(async () =>
+    {
+        int? picked = null;
+        List<PaletteItem> items = choices.Select((choice, index) => new PaletteItem(choice, plugin, () => picked = index)).ToList();
+        if (await Dialogs.ChooseAsync(items, title) is PaletteItem chosen) chosen.Run();
+        return picked;
+    });
 }

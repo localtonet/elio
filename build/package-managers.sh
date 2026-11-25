@@ -34,12 +34,18 @@ hash_of() {
 
 mkdir -p "$OUT"
 
-# ---- Windows: winget and Scoop. The zip holds elio-<version>-win-x64/elio.exe.
-if [ -f "$DIST/elio-win-x64.zip" ]; then
-    WIN_HASH=$(hash_of "$DIST/elio-win-x64.zip")
-    WIN_UPPER=$(echo "$WIN_HASH" | tr 'a-f' 'A-F')
-    FOLDER=elio-$VERSION-win-x64
+# ---- Windows: winget and Scoop, with each Windows build the release has (x64 and ARM64). Each zip holds
+# elio-<version>-<rid>/elio.exe, so every build names its own folder.
+WIN_RIDS=
+for RID in win-x64 win-arm64; do
+    if [ -f "$DIST/elio-$RID.zip" ]; then WIN_RIDS="$WIN_RIDS $RID"; fi
+done
 
+# What winget and Scoop call each processor.
+winget_arch() { case "$1" in win-x64) echo x64 ;; win-arm64) echo arm64 ;; esac; }
+scoop_arch() { case "$1" in win-x64) echo 64bit ;; win-arm64) echo arm64 ;; esac; }
+
+if [ -n "$WIN_RIDS" ]; then
     W=$OUT/winget
     mkdir -p "$W"
     cat > "$W/Localtonet.Elio.yaml" <<EOF
@@ -56,15 +62,21 @@ PackageIdentifier: Localtonet.Elio
 PackageVersion: $VERSION
 InstallerType: zip
 NestedInstallerType: portable
-NestedInstallerFiles:
-- RelativeFilePath: $FOLDER\\elio.exe
-  PortableCommandAlias: elio
 Commands:
 - elio
 Installers:
-- Architecture: x64
-  InstallerUrl: $BASE/elio-win-x64.zip
-  InstallerSha256: $WIN_UPPER
+EOF
+    for RID in $WIN_RIDS; do
+        cat >> "$W/Localtonet.Elio.installer.yaml" <<EOF
+- Architecture: $(winget_arch "$RID")
+  NestedInstallerFiles:
+  - RelativeFilePath: elio-$VERSION-$RID\\elio.exe
+    PortableCommandAlias: elio
+  InstallerUrl: $BASE/elio-$RID.zip
+  InstallerSha256: $(hash_of "$DIST/elio-$RID.zip" | tr 'a-f' 'A-F')
+EOF
+    done
+    cat >> "$W/Localtonet.Elio.installer.yaml" <<EOF
 ReleaseDate: $TODAY
 ManifestType: installer
 ManifestVersion: 1.6.0
@@ -103,12 +115,17 @@ EOF
     "homepage": "$HOMEPAGE",
     "license": "Apache-2.0",
     "architecture": {
-        "64bit": {
-            "url": "$BASE/elio-win-x64.zip",
-            "hash": "$WIN_HASH"
-        }
+EOF
+    SEPARATOR=
+    for RID in $WIN_RIDS; do
+        printf '%s        "%s": {\n            "url": "%s",\n            "hash": "%s",\n            "extract_dir": "%s"\n        }' \
+            "$SEPARATOR" "$(scoop_arch "$RID")" "$BASE/elio-$RID.zip" "$(hash_of "$DIST/elio-$RID.zip")" "elio-$VERSION-$RID" >> "$OUT/scoop/elio.json"
+        SEPARATOR=",
+"
+    done
+    cat >> "$OUT/scoop/elio.json" <<EOF
+
     },
-    "extract_dir": "$FOLDER",
     "bin": "elio.exe",
     "shortcuts": [
         ["elio.exe", "Elio"]

@@ -203,8 +203,43 @@ public sealed class UpdateManifestTests
         Assert.Equal("elio-osx-x64.zip", UpdateTarget.For(OSPlatform.OSX, Architecture.X64)!.AssetName);
         Assert.Equal("elio-linux-arm64.tar.gz", UpdateTarget.For(OSPlatform.Linux, Architecture.Arm64)!.AssetName);
         Assert.Equal(UpdateArchive.TarGz, UpdateTarget.For(OSPlatform.Linux, Architecture.X64)!.Archive);
-        Assert.Null(UpdateTarget.For(OSPlatform.Windows, Architecture.Arm64));
+        Assert.Null(UpdateTarget.For(OSPlatform.Windows, Architecture.X86));
         Assert.Null(UpdateTarget.For(OSPlatform.FreeBSD, Architecture.X64));
+    }
+
+    [Fact]
+    public void Target_WindowsOnArm_IsTheArmZip_NeverTheX64One()
+    {
+        UpdateTarget arm = UpdateTarget.For(OSPlatform.Windows, Architecture.Arm64)!;
+
+        Assert.Equal("elio-win-arm64.zip", arm.AssetName);
+        Assert.Equal("elio.exe", arm.ProgramName);
+        Assert.Equal(UpdateArchive.Zip, arm.Archive);
+        Assert.NotEqual(UpdateTarget.For(OSPlatform.Windows, Architecture.X64)!.AssetName, arm.AssetName);
+    }
+
+    [Fact]
+    public void Target_RunningFromAnAppImage_IsNone_SoTheReleaseIsOnlyAnnounced()
+    {
+        Assert.Null(UpdateTarget.For(OSPlatform.Linux, Architecture.X64, appImage: "/home/a/Applications/elio-linux-x64.AppImage"));
+        Assert.Null(UpdateTarget.For(OSPlatform.Linux, Architecture.Arm64, appImage: "/home/a/elio-linux-arm64.AppImage"));
+
+        // With no AppImage, or the variable set to nothing, it is the tar.gz as before.
+        Assert.Equal("elio-linux-x64.tar.gz", UpdateTarget.For(OSPlatform.Linux, Architecture.X64, appImage: null)!.AssetName);
+        Assert.Equal("elio-linux-x64.tar.gz", UpdateTarget.For(OSPlatform.Linux, Architecture.X64, appImage: "")!.AssetName);
+
+        // And so the notice offers the download page, not "Update and restart", even where the program could be written to.
+        string folder = Path.Combine(TestData.Root, "appimage-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            UpdateTarget? target = UpdateTarget.For(OSPlatform.Linux, Architecture.X64, appImage: Path.Combine(folder, "elio-linux-x64.AppImage"));
+            Assert.False(UpdateInstaller.CanInstall(target, Path.Combine(folder, "elio"), hasKey: true, singleFile: true));
+        }
+        finally
+        {
+            TestData.Delete(folder);
+        }
     }
 }
 
@@ -724,6 +759,34 @@ public sealed class UpdateInstallerTests : IDisposable
 
         await Assert.ThrowsAsync<UpdateException>(() => InstallAsync());
         AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Install_OnWindowsOnArm_TakesTheArmZip_AndNeverAsksForTheX64One()
+    {
+        byte[] x64 = ZipOf("elio-1.1.0-win-x64/elio.exe", "X64");
+        byte[] arm = ZipOf("elio-1.1.0-win-arm64/elio.exe", "ARM64");
+        string manifest = "{\"version\":\"1.1.0\",\"files\":{"
+            + "\"elio-win-x64.zip\":{\"sha256\":\"" + Convert.ToHexStringLower(SHA256.HashData(x64)) + "\",\"size\":" + x64.Length + "},"
+            + "\"elio-win-arm64.zip\":{\"sha256\":\"" + Convert.ToHexStringLower(SHA256.HashData(arm)) + "\",\"size\":" + arm.Length + "}}}";
+        Serve("elio-win-arm64.zip", arm, manifest);
+        _served["elio-win-x64.zip"] = x64;
+
+        await InstallAsync(target: UpdateTarget.For(OSPlatform.Windows, Architecture.Arm64));
+
+        Assert.Equal("ARM64", File.ReadAllText(_program));
+        Assert.Equal(["update.json", "update.json.sig", "elio-win-arm64.zip"], _requested.Select(address => address.Segments[^1]));
+    }
+
+    [Fact]
+    public async Task Install_OnWindowsOnArm_ReleaseWithOnlyTheX64Zip_ChangesNothing()
+    {
+        // A release whose ARM64 build failed. The x64 program would run under emulation, but it is not what this copy is.
+        Serve("elio-win-x64.zip", ZipOf("elio-1.1.0-win-x64/elio.exe", "X64"));
+
+        await Assert.ThrowsAsync<UpdateException>(() => InstallAsync(target: UpdateTarget.For(OSPlatform.Windows, Architecture.Arm64)));
+        AssertNothingChanged();
+        Assert.DoesNotContain(_requested, address => address.Segments[^1] == "elio-win-x64.zip");
     }
 
     [Fact]

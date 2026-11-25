@@ -1,0 +1,7 @@
+{
+  "name": "ask-claude",
+  "description": "Asks Claude what the selected text, or the last command's output, means. Sends it to Anthropic only after you say yes.",
+  "version": "1.0.0",
+  "command": "python",
+  "args": ["plugin.py"]
+}

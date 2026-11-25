@@ -48,7 +48,7 @@ Not on winget yet, because the package cannot be submitted for now. When it can,
 winget install Localtonet.Elio                              # Windows
 -->
 
-On Linux, install the `.deb` from the releases page, or unpack the `.tar.gz`.
+On Linux, install the `.deb` from the releases page, or download the `.AppImage`, make it executable (`chmod +x`) and run it, or unpack the `.tar.gz`.
 
 **First run.** The window opens with the server list on the left and four ways to begin in the middle: **Local shell**, **Add server**, **Import OpenSSH config** and **Command palette**.
 
@@ -60,9 +60,11 @@ On Linux, install the `.deb` from the releases page, or unpack the `.tar.gz`.
 
 **Connect.** Double-click a server in the sidebar, or press `Ctrl+Shift+T` (**Connect to a server**) and type a few letters of its name. The first time, Elio shows the server's host key and asks you to trust it. A password you type can be stored in the encrypted vault. `Ctrl+Shift+L` opens a local shell.
 
+**From the command line and from links.** `elio ssh deploy@web-1` (with `-p`, `-l` and `-i` as in ssh) connects to that address, through the saved server that has it if there is one. `elio connect "Web server 1"` opens a saved server by name and `elio workspace "Morning checks"` a saved workspace. When Elio is already running, these open in the window that is there. `elio --help` lists them. **Open ssh:// and elio:// links with Elio** in Settings (Windows and Linux; a Mac and a phone do it on their own) makes `ssh://user@host:port`, `elio://connect/<server>` and `elio://workspace/<name>` links clicked anywhere open in Elio. A link always asks before it connects, since anyone can put one in front of you, and a password in a link is never used.
+
 **The command palette.** `Ctrl+Shift+P` lists every command, your snippets, plugin commands, servers and local shells in one searchable list. Everything described below can be reached from it.
 
-<img src="docs/screenshots/palette-dark.webp" alt="The command palette listing pane, server and workspace commands, with Import servers naming OpenSSH, PuTTY, Ansible, CSV, DigitalOcean and AWS" width="560">
+<img src="docs/screenshots/palette-dark.webp" alt="The command palette listing pane, server and workspace commands, with Import servers naming OpenSSH, PuTTY, Ansible, CSV and the cloud providers" width="560">
 
 **Settings.** The six buttons at the bottom of the sidebar open **Settings** (the gear), **Sync**, **Workspaces**, the **Keychain**, **Keyboard shortcuts** and the **Command palette**. Settings also opens with `Ctrl` + `,`.
 
@@ -95,8 +97,9 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 - **Find in output** (`Ctrl+Shift+F`) searches everything a terminal has printed, history included, as plain text or as a regular expression, with every match on screen marked. Enter goes to the older match, Shift+Enter to the newer one.
 - A scrollbar for the history that stays out of the way until there is something to scroll. Dragging a selection past the edge keeps scrolling.
 - **Shell marks.** In a shell that marks its commands (OSC 133), **Go to the previous command** and **Go to the next command** (`Ctrl+Shift+Up` / `Ctrl+Shift+Down`) jump from prompt to prompt, and **Copy the last command's output** (`Ctrl+Shift+Y`) copies a whole result. The palette entry **Mark commands in this shell (bash, zsh, PowerShell)** turns marking on for the shell in front, with nothing to install.
-- **Save output / stop** writes a pane's output to a file as it arrives. **Clear screen and history** is `Ctrl+Shift+Delete`.
-- Ctrl+click opens a web address.
+- **Save output / stop** writes a pane's output to a file as it arrives. A server can do it for every session (**Save the output of every session with this server to a file**, or **Record every session with this server (asciinema)**, in its Advanced section). **Clear screen and history** is `Ctrl+Shift+Delete`.
+- Ctrl+click opens a web address. Links that programs mark as links (OSC 8, as `ls --hyperlink` and many tools write them) work too, whatever text they sit on; holding Ctrl over one shows where it goes before it is clicked, and only `http` and `https` links are opened.
+- **Record this terminal (asciinema) / stop**, in the palette or the pane's menu, records what the terminal shows as an asciicast in Elio's logs folder, to play back with `asciinema play` or share. Only output is recorded, never what is typed.
 
 ![Find in output with a regular expression: the bar shows 1 of 4 and every matching file name is marked](docs/screenshots/search-dark.webp)
 
@@ -113,11 +116,14 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 **Pictures**
 
 - Programs that speak the Kitty graphics protocol can show images, plots, thumbnails and animations right in the output.
+- **Sixel** pictures, which many older and simpler tools write (`img2sixel`, `gnuplot`, `chafa -f sixel`), are shown too: Elio turns each one into the same kind of picture as it arrives. It says so in its answer to a program that asks what the terminal can do, and answers when a program asks for the window's size in pixels. A picture is at most 4096 pixels on a side and about 10 MB once decoded; a larger one is left out.
+- The **Kitty keyboard protocol**: programs that ask for it (recent versions of Neovim, Helix, fish and others) are told about key releases and repeats, and can tell Ctrl+I from Tab and Escape from Alt combinations.
 - **Take a picture of this terminal** (`Ctrl+Shift+S`, or the pane's right-click menu) saves a sharp PNG of the pane to `Pictures\Elio`, puts it on the clipboard and shows a preview with buttons to copy it again or open its folder.
 
 **Tabs that keep you informed**
 
 - A tab shows what happened while you were elsewhere: a bell, a notification from the running program, a finished task, or its progress as a bar along the tab. On Windows the taskbar button flashes when that happens while you are in another program.
+- **Tell me when the output shows** in Settings takes words or regular expressions, one per line, such as `BUILD FAILED` or `error:`. A line of output that matches marks its tab and asks for attention the same way. A line written `pattern => text` answers instead: when the pattern shows, even on a question still waiting for an answer such as `Continue? [y/N]`, the text is typed and Enter pressed. It answers a line once, and the same rule at most every two seconds, so output that keeps asking cannot turn it into a loop.
 - Tabs name the AI tool running in them: Claude Code, Codex, Gemini, Copilot, Aider or Cursor, found by looking at what the shell is running.
 - A shell working inside a git repository carries the repository's name on its tab. **Group tabs by repository** puts tabs of the same repository side by side, and **Keep tabs of the same repository together** in Settings keeps them that way.
 
@@ -127,7 +133,7 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 - **Summon key (Windows).** Set a key in Settings and it shows or hides the window from anywhere; optionally the window drops down from the top of the screen. With a summon key set, Elio also sits in the system tray.
 - **Shells that outlive the window.** With **Keep local shells running when Elio closes, and pick them up again**, local shells run in a small background process. Closing Elio, or replacing it with a newer version, leaves them running for the next window to pick up exactly where they were.
 - **Portable mode.** Create a folder named `data` beside the program and Elio keeps everything in it: settings, servers, downloads and logs. Carry it on a USB drive and nothing is left behind on the computer you plug it into. Saved passwords stay locked to the account that stored them, so another computer asks for them again.
-- **Updates.** When a newer version is out, a line above the terminals says so. **Update and restart** downloads it, checks it and swaps it in, and Elio comes back with your tabs; nothing is installed until you press it. **Check for updates** in the palette asks at once. Where Elio cannot replace itself, as when a package manager installed it, the line opens the download page instead. Only a release signed with Elio's own release key is installed: see [Security](#security).
+- **Updates.** When a newer version is out, a line above the terminals says so. **Update and restart** downloads it, checks it and swaps it in, and Elio comes back with your tabs; nothing is installed until you press it. **Check for updates** in the palette asks at once. Where Elio cannot replace itself, as when a package manager installed it or it runs from an AppImage, the line opens the download page instead. Only a release signed with Elio's own release key is installed: see [Security](#security).
 
 <img src="docs/screenshots/settings-dark.webp" alt="The Settings window: language, theme, following the system, font size, light interface, ligatures and more" width="420">
 
@@ -139,6 +145,11 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 - **FIDO2 security keys**: log in with a key that never leaves the hardware. On Windows Elio talks to the key through Windows itself; elsewhere such keys work through the SSH agent.
 - Any number of **jump hosts**, each verified on its own. Name them in order under **Jump hosts** in the server's Advanced section.
 - **Through a proxy**: SOCKS5 or HTTP CONNECT, with a user name and password if the proxy wants them, under **Connect through** in the server's Advanced section. The server's name goes to the proxy as you typed it, so names only the proxy can look up work. With jump hosts, the proxy leads to the first of them.
+- **Through a command** (OpenSSH's ProxyCommand), such as `cloudflared access ssh --hostname %h` or `aws ssm start-session --target %h --document-name AWS-StartSSHSession`: the command runs on this computer and its input and output carry the connection. `%h`, `%p` and `%r` are the server's address, port and user. A server entry can arrive through sync or in a file, so Elio shows the command and asks before it runs it for the first time on each device, and an address or user name that would change what the command does is refused.
+- **Environment variables** to send to the server, one `NAME=value` per line in the Advanced section, as OpenSSH's SetEnv does. The server's `AcceptEnv` decides which it takes.
+- **One connection for many terminals** (like OpenSSH's ControlMaster): with **Open more terminals to this server over the connection already open** in the Advanced section, a second tab to the server opens at once, without a second login, host key check or one-time code, and the connection closes with the last terminal using it. Port forwards stay with the first terminal; X11 forwarding is not shared.
+- **Keep-alive interval** per server, for networks that drop quiet connections sooner than Elio's usual 20 seconds would notice.
+- **Passwords from a password manager.** Where Elio asks for a password, on a server or an identity, write where your password manager keeps it instead: `op://vault/item/password` for 1Password, `bw://item` (a name or an id) for Bitwarden. The vault keeps only the reference, and the password is fetched through the manager's own command line tool (`op` or `bw`) each time a connection is made, with its own unlocking; a locked Bitwarden asks for its master password once per run and keeps only the session it gives. AI tools connected with `elio --mcp` fetch the same way.
 - **Local, remote and dynamic (SOCKS5) port forwarding**, one per line under **Port forwards**: `L 8080:localhost:80`, `R 9000:localhost:3000`, `D 1080`. An address to listen on goes in front, and an IPv6 address is written in brackets: `L [::1]:8080:localhost:80`.
 - **Agent forwarding**, so `git` and `ssh` on the server can use the keys on your computer without those keys ever being copied there.
 - **X11 forwarding**: graphical programs on the server open their windows on your screen. The server is only ever given a throwaway cookie, never the real one.
@@ -151,6 +162,10 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 **Local shells.** Found automatically and opened from the terminal button above the server list (right-click it for the others). While there is no server or device yet, they are also listed under **This computer** in the sidebar. They are PowerShell, Command Prompt, WSL distributions, Git Bash, Cygwin, MSYS2 and Cmder on Windows; your login shell and the ones in `/etc/shells` elsewhere. A server of type local is a **profile**: your own command, starting folder and environment variables.
 
 **Docker containers.** **Docker containers** in the palette lists the containers running on this computer and opens a shell in the one you pick.
+
+**Docker containers on a server.** Right-click a saved SSH server and pick **Docker containers…** (or **Docker containers on a server…** in the palette) to list what Docker runs there and open a shell in one of them, over the server's own connection and login. The user it logs in as needs to be allowed to use Docker without sudo; if not, the server's message is shown.
+
+**Kubernetes pods.** **Kubernetes pods** in the palette lists the running pods of the cluster `kubectl` points at and opens a shell in the one you pick, through `kubectl exec` with your own context and login.
 
 **Telnet**, with terminal type and window size negotiation.
 
@@ -165,21 +180,24 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 - **The keychain.** An **identity** is a user name with a password or a private key, saved once under **Keychain** (in the sidebar and the palette) and picked on any number of servers or groups. Change it there and every one of them follows. The key is kept in the vault as text, not as a path to a file, so it reaches your other devices through sync.
 - **Generate key** in the keychain makes an Ed25519, ECDSA P-256 or RSA 4096 key, with a passphrase if you want one, and shows the public key to copy. **Install on a server…** logs in to the servers you tick the way they log in today, adds the public key to `~/.ssh/authorized_keys` unless it is there already, and then offers to switch those servers to the new identity. A server whose host key is not known yet is left alone.
 - **Import servers…** in the palette brings servers in from wherever they already are, and importing twice adds nothing twice:
-  - **OpenSSH config** reads `~/.ssh/config`, including `Include`, `ProxyJump`, forwards and `RemoteCommand`, and **PuTTY sessions** brings in what PuTTY has saved.
+  - **OpenSSH config** reads `~/.ssh/config`, including `Include`, `ProxyJump`, `ProxyCommand`, `SetEnv`, forwards and `RemoteCommand`, and **PuTTY sessions** brings in what PuTTY has saved.
   - **An Ansible inventory**, in the INI form or the usual YAML layout: `ansible_host`, `ansible_user`, `ansible_port` and `ansible_ssh_private_key_file` are read, ranges such as `web[01:03].example.com` are expanded, and groups become groups, nested as their `children` are. The YAML reader is deliberately small: a file that uses lists, anchors or anything else it does not read is refused with the line number rather than half understood.
   - **A CSV or TSV file** with a header row: name, host, port, user, group and tags, under the names a spreadsheet is likely to give them.
-  - **DigitalOcean** droplets, with an API token, and running **AWS EC2** instances of one region, with an access key. The credentials are asked for each time and go to the provider only; tick **Remember in the vault** to keep them there. Both were written against the providers' documentation and have not yet been tried on real accounts. Azure is not there yet, because it needs an app registered with Microsoft first.
+  - **Cloud accounts**: **DigitalOcean** droplets, with an API token; running **AWS EC2** instances of one region, with an access key; **Hetzner Cloud** servers, **Linode** instances and **Vultr** instances, with an API token or key; and the devices of a **Tailscale** tailnet, with an API access token. Each provider's servers go into a group named after it, addressed by their public IPv4 address where they have one (IPv6 or the private address otherwise; for Tailscale, the MagicDNS name or the 100.x address), with regions, locations and tags kept as tags. The credentials are asked for each time and go to the provider only; tick **Remember in the vault** to keep them there. All of these were written against the providers' documentation and have not yet been tried on real accounts.
+  - **Azure** and **Google Cloud** through your own command-line tools, so nothing needs to be registered and Elio is given no credentials: `az` lists the running virtual machines of the subscription it is signed in to (group "Azure / <subscription>", the public address or else the private one, the administrator as the user, the location and tags as tags), and `gcloud` lists the Compute Engine instances of its current project (group "Google Cloud / <project>", the external address or else the internal one, with zone, labels and status as tags). Install the tool and sign in with `az login` or `gcloud auth login` first.
+  - **Proxmox VE**, with the server's address and an API token (`user@realm!name` and its secret): the virtual machines and containers that are running and whose address Proxmox knows, from the QEMU guest agent or the container itself, grouped under the server's name; the import says how many it left out. Proxmox usually has a certificate it signed itself, so the first time Elio shows its SHA-256 fingerprint and goes on only if you accept it; the token is not sent before that. Only that certificate is accepted afterwards, and with **Remember in the vault** it is kept with the token.
 - **Export servers to a file** and **Import servers from a file** move a library between computers or to a colleague. Passwords and private keys are never in the file: an identity arrives with its name, user name and public key, and an imported server is never attached to an identity that was already here.
+- **Export servers as an OpenSSH config file** writes the SSH servers as `Host` blocks, with what their groups give them filled in, so `ssh`, `scp`, `git` and editors reach them by the same names. Add `Include` with the file's path to `~/.ssh/config` to use it. Nothing from the vault goes into it: a server that logs in with an identity's key gets a comment saying so.
 - **Host key pinning.** A server's key is shown on first connection, and a changed key stops the connection before any credential is sent.
 - **The vault.** Passwords and passphrases live in an encrypted vault whose key is held by the operating system. On Windows it can also be put behind Windows Hello (**Ask for Windows Hello before saved passwords are used**).
 
 ### Many servers at once
 
 - **Open a group side by side.** Right-click a group and choose **Open all side by side**, or Ctrl+click several servers and choose **Open selected side by side**: one tab, one pane each.
-- **Workspaces.** **Save this layout as a workspace…** keeps the window's tabs under a name: which servers and local shells, how each tab is split, and the tabs' names, colors and pins. **Open workspace…**, or the workspaces button at the bottom of the sidebar, adds those tabs to the window and connects them as a restored session does. A server deleted since is left out with a note. Workspaces stay on the device they were saved on; they are not synced yet.
+- **Workspaces.** **Save this layout as a workspace…** keeps the window's tabs under a name: which servers and local shells, how each tab is split, and the tabs' names, colors and pins. **Open workspace…**, or the workspaces button at the bottom of the sidebar, adds those tabs to the window and connects them as a restored session does. A server deleted since is left out with a note. Workspaces travel to your other devices with sync, like the servers they open.
 - **Drag onto a pane.** Drag a server or a local shell from the sidebar onto a terminal. The half of the pane under the pointer lights up, and the new connection opens on that side: left, right, above or below.
 - **Broadcast input** (`Ctrl+Shift+B`): type once, reach every pane in the tab, with a red bar across the top for as long as it is on. A pane can be left out from its right-click menu.
-- **Snippets** for the commands you run often live at the bottom of the sidebar and in the palette; choosing one types it into the terminal in front.
+- **Snippets** for the commands you run often live at the bottom of the sidebar and in the palette, in folders if you give them one; choosing one types it into the terminal in front. A snippet can have blanks: `git checkout {{branch:main}}` asks for the branch, with `main` already filled in, before it is typed. Only a plain name between the braces is a blank, so `docker ps --format '{{.Names}}'` and other templates are typed as they are. A snippet can be for some servers or groups only: the palette then offers it only in their terminals, and the sidebar says which they are.
 - **Run a command on several servers**: tick the servers, enter the command, and read each server's exit code, duration and output in one table. Failed ones can be run again on their own.
 
 ![A server dragged from the sidebar over a terminal: the right half of the pane is lit to show where it will open](docs/screenshots/drop-server-dark.webp)
@@ -201,6 +219,9 @@ On macOS the shortcuts in this document use `Cmd` in place of `Ctrl`, except for
 - **A built-in editor.** `F4`, or **Edit** in the right-click menu, opens a text file in Elio itself, on this computer or on a server, and on a phone too, where there is no other program to edit in. It has find and replace (plain or regular expression, with every match counted), go to line, undo, auto-indent, word wrap and a text size of your choice. On a phone the toolbar folds into a menu and a row of keys above the keyboard adds Tab and the symbols code needs. Files keep their line endings and byte order mark, `Ctrl+S` saves, a file that changed on the server in the meantime is not overwritten without asking, and leaving with unsaved changes asks first. Files over 2 MB, and files that are not text, are not opened.
 - **Preview.** `Space` shows the chosen file without copying it anywhere: text and code, pictures, the names in a folder, or the first bytes of anything else. The arrows in its corner (or `Alt`+`Up` / `Alt`+`Down`) go to the previous or next file in the list, and **Edit** there opens the editor.
 - **New file, copy, cut, paste and duplicate.** **New file** (`Ctrl+N`), **Copy** (`Ctrl+C`), **Cut** (`Ctrl+X`), **Paste** (`Ctrl+V`) and **Duplicate** (`Ctrl+D`) work in a folder and between folders of one side, and a copy pasted on the other side is a transfer. A copy that would take the name of something there is named "report copy.txt" instead, and nothing is ever replaced. On a server a copy is made by the server itself when it can be given commands. `Esc` stops a job that is running.
+- **Permissions** on several files at once, and on a folder and everything in it, as FileZilla offers them: to everything inside, only to the files, or only to the folders. Links inside are left alone and not followed. On a server that can be given commands, "everything" is one `chmod -R`; otherwise each item is changed in turn, and the ones that could not be changed are listed at the end. On this computer this works on Linux and macOS; Windows has no permissions of this kind.
+- **Speed limit.** The button above the transfer list sets a limit in KB a second for downloads and for uploads, shared by all transfers going that way in every file tab and kept for next time. A copy between two servers counts as both, and goes by the lower one.
+- **Compare and synchronise.** The compare button over each list (or **Compare folders** in the palette) marks, for the two folders shown, what is only on one side, newer on one side, or differs, with or without the folders below. **Synchronise…** then shows what would be copied in the direction you choose, left to right, right to left or both ways with the newer file winning, with the number of files and their size, and copies nothing until you say so. Copies go through the transfer queue with its safe replace, and nothing is ever deleted.
 - **Rename several.** With more than one file chosen, **Rename several...** (`F2`) offers find and replace (regular expressions included), numbering with a pattern, upper and lower case, and text added before or after the name, and shows what each file would be called before anything is renamed. Names that clash, with each other or with something already there, are pointed out and block the rename; swaps and chains are carried out safely.
 - **Folders you go to often.** The pin button lists the folders you open most, kept apart for this computer and for each server, with recent ones counting for more.
 - **Search inside files.** The last button of the search bar looks for words inside the files below the folder, with `Enter`: on a server by running `grep` (or `rg` if it has it), on this computer by reading the files itself. The results show the line that matched, and `Enter` on one goes to the file. It needs a server that can be given commands.
@@ -221,7 +242,7 @@ Any terminal can be shared with a link and a password. Whoever opens the link in
 
 ### Sync
 
-Sync keeps your servers, groups, snippets, identities and known host keys the same on every device, and saved passwords and keys too if you leave **Also sync saved passwords** on.
+Sync keeps your servers, groups, snippets, workspaces, identities and known host keys the same on every device, and saved passwords and keys too if you leave **Also sync saved passwords** on.
 
 - **End-to-end encrypted.** The key is derived from your password with Argon2id on your device. A recovery key, shown once when sync is started, protects you from a forgotten password. The server stores ciphertext and nothing else.
 - **No account needed.** The first device makes a **sync code**; the others take the code and your password.
@@ -250,8 +271,10 @@ Elio is also a [Model Context Protocol](https://modelcontextprotocol.io) server.
 | --- | --- |
 | `list_servers` | Lists the servers saved in Elio and your Localtonet devices: name, kind, address, user, group and tags. Never passwords or keys |
 | `run_command` | Runs one command over SSH on a saved server or a Localtonet device and returns its exit code and output |
+| `read_file` | Reads the first 64 KB of a file on such a server (`head -c`), and is marked read-only for the AI tool |
+| `list_directory` | Lists a folder on such a server (`ls -la`), and is marked read-only for the AI tool |
 
-`run_command` is off until you tick **Let AI tools connected with "elio --mcp" run commands on your servers** in Settings, and then works only on the servers where you have also ticked **AI tools may run commands on this server** (edit the server, under **Advanced**; for a Localtonet device, **Edit** in its right-click menu). Even then it only works on servers you have already connected to from Elio yourself, so that their host key is trusted and their credentials are in the vault. A Localtonet device needs its access key saved in the vault instead, because an AI tool cannot approve a connection in the browser; without one the command is refused, and a key that has lapsed is reported the same way. A command may run for two minutes, and output beyond 64 KB is cut. Every command that is run is written to `mcp-commands.log` in Elio's data folder, with the time, the server and how it ended.
+`read_file` and `list_directory` run as commands too, with the same permissions, limits and log as `run_command`, on servers with a POSIX shell. `run_command` is off until you tick **Let AI tools connected with "elio --mcp" run commands on your servers** in Settings, and then works only on the servers where you have also ticked **AI tools may run commands on this server** (edit the server, under **Advanced**; for a Localtonet device, **Edit** in its right-click menu). Even then it only works on servers you have already connected to from Elio yourself, so that their host key is trusted and their credentials are in the vault. A Localtonet device needs its access key saved in the vault instead, because an AI tool cannot approve a connection in the browser; without one the command is refused, and a key that has lapsed is reported the same way. A command may run for two minutes, and output beyond 64 KB is cut. Every command that is run is written to `mcp-commands.log` in Elio's data folder, with the time, the server and how it ended.
 
 The tool runs in a process of its own, but the window you have open tells you about it. A line above the terminals says which command ran on which server, and **Show all** (or **Commands run by AI tools** in the palette) opens a column beside the terminals where every command appears as it starts, with its exit code, how long it took and what it printed. For that column the commands and their output are kept in `mcp-activity.jsonl` in the data folder, at most 32 KB for each command and about 1 MB in all; **Clear** in the column deletes the file. The server form says so when you allow a server while the switch in Settings is still off, and can turn that on with it.
 
@@ -270,6 +293,8 @@ Most tools take a configuration like this:
 ### Plugins
 
 A plugin is any program that speaks a few JSON messages on its standard input and output, in any language. It adds commands to the palette, and when one runs it can type into the terminal, ask a question, show a note, copy text or open a web page. Plugins never see passwords or keys.
+
+Plugins can also list the saved servers (never their secrets), read what the last command printed, open a server, let the user choose from a list and show a longer text. [docs/plugin-ask-claude](docs/plugin-ask-claude) is one that asks Claude what the output in a terminal means, with your own Anthropic API key: it is a plugin rather than part of Elio so that nothing goes to Anthropic for anyone who has not installed it, and it says how much output would be sent and asks before it sends any.
 
 Each plugin is a folder with a `plugin.json` in it, inside `plugins` in Elio's data folder (`%LOCALAPPDATA%\Elio\plugins` on Windows, `data\plugins` in portable mode). Elio asks before it runs a plugin for the first time, and again if its `plugin.json` changes. The protocol is described in [docs/PLUGINS.md](docs/PLUGINS.md), and a working example is in [docs/plugin-example](docs/plugin-example).
 
@@ -335,6 +360,7 @@ A few keys belong to the terminal itself: the right arrow accepts a suggestion a
 - Plugins and AI tools never receive passwords or keys. An AI tool can run commands only where you allowed it twice, in Settings and on the server, and what it ran is shown in the window and written to a log.
 - On a phone, Elio can be locked behind the device's fingerprint, face or passcode.
 - No telemetry. Passwords and keys are never written to logs.
+- When Elio fails, a report is written to its logs folder on your computer and you are told at the next start. It is never sent anywhere.
 - The only request Elio makes on its own is a version check: on a computer, at most once every six hours, it asks GitHub for the latest release and tells you if there is a newer one. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
 - Updates are installed only when you press **Update and restart**, and only if they come from us. Each release carries a manifest (`update.json`) that lists its version and the SHA-256 of every file, signed with ECDSA (P-256) by a key that exists only in the release workflow's secrets. Elio checks the signature against the public keys built into the program ([`update-keys.txt`](src/Elio.Core/update-keys.txt)), the manifest against the version it was told about, and the downloaded file against the manifest, before it replaces anything. A file someone swapped on the releases page, or an older signed release served again, is refused. A copy built without a key in that file never installs anything by itself.
 
@@ -342,7 +368,7 @@ Found a security problem? [SECURITY.md](SECURITY.md) says how to report it priva
 
 ## Privacy
 
-Elio has no telemetry, no analytics, no crash reports and no account of its own. Your servers, passwords, keys and settings stay on your device. Apart from the servers you connect to, it talks to the network only in these cases:
+Elio has no telemetry, no analytics, no crash reports sent anywhere (a report of a failure is only written on your own computer) and no account of its own. Your servers, passwords, keys and settings stay on your device. Apart from the servers you connect to, it talks to the network only in these cases:
 
 - **The version check** (computers only): at most once every six hours it asks GitHub for the latest release. Nothing about you or your servers is sent, and **Check for new versions when Elio starts** in Settings turns it off.
 - **Updating**, when you press **Update and restart**: Elio downloads that release's files from github.com. Nothing about you or your servers is sent.
@@ -374,7 +400,7 @@ Elio targets .NET 10.
 libghostty-vt is built from source by `build/native.sh`. The script pins every version, checks every download against its SHA-256, and leaves the libraries in `native/out/<rid>`. Docker is all it needs:
 
 ```bash
-docker run --rm -v "$PWD:/src" -w /src ruby:3.3 sh build/native.sh win-x64 linux-x64 linux-arm64
+docker run --rm -v "$PWD:/src" -w /src ruby:3.3 sh build/native.sh win-x64 win-arm64 linux-x64 linux-arm64
 ```
 
 Android targets also need the Linux NDK in `ANDROID_NDK_HOME`.
@@ -399,13 +425,20 @@ dotnet build Elio.sln
 
 The tests need no workloads and touch neither the network nor your own Elio data; run them with `dotnet test tests/Elio.Tests`.
 
-A single file that runs without .NET installed, with the terminal engine inside it (`win-x64`, `linux-x64` or `linux-arm64`):
+A single file that runs without .NET installed, with the terminal engine inside it (`win-x64`, `win-arm64`, `linux-x64` or `linux-arm64`):
 
 ```bash
 dotnet publish src/Elio.Desktop -c Release -r win-x64 -o publish/elio
 ```
 
 On Linux the file needs the libraries a desktop already has: ICU (`libicu`), fontconfig and X11.
+
+`build/package-deb.sh` and `build/package-appimage.sh` turn that file into a .deb and an AppImage. The AppImage script downloads appimagetool and the AppImage runtime at pinned versions and checks each against its SHA-256:
+
+```bash
+dotnet publish src/Elio.Desktop -c Release -r linux-x64 -o publish/linux
+sh build/package-appimage.sh 1.0.0 linux-x64 publish/linux dist
+```
 
 On a Mac the same command with `-r osx-arm64` or `-r osx-x64` leaves the program with its libraries beside it, and `build/package-macos.sh` turns that into a signed `Elio.app`:
 
@@ -431,9 +464,9 @@ On Windows this needs the Visual Studio C++ build tools.
 
 ### Releases
 
-Pushing a tag such as `v1.2.3` runs `.github/workflows/release.yml`, which rebuilds libghostty-vt from source, builds Elio for Windows (x64), Linux (x64 and arm64, each as a tar.gz and a .deb), macOS (Apple silicon and Intel, as `Elio.app`) and Android, and publishes them on the releases page with a `SHA256SUMS` file. A tag with a hyphen, such as `v1.2.3-beta.1`, becomes a pre-release. The Android package is signed with the key in the repository's `ANDROID_KEYSTORE_*` secrets, which the workflow file describes.
+Pushing a tag such as `v1.2.3` runs `.github/workflows/release.yml`, which rebuilds libghostty-vt from source, builds Elio for Windows (x64 and ARM64), Linux (x64 and arm64, each as a tar.gz, a .deb and an AppImage), macOS (Apple silicon and Intel, as `Elio.app`) and Android, and publishes them on the releases page with a `SHA256SUMS` file. A tag with a hyphen, such as `v1.2.3-beta.1`, becomes a pre-release. The Android package is signed with the key in the repository's `ANDROID_KEYSTORE_*` secrets, which the workflow file describes. When the `IOS_*` and `APP_STORE_CONNECT_*` secrets that the workflow file lists are set, the iPhone and iPad app is also signed and sent to TestFlight; without them that step is skipped.
 
-**Updates from inside the app.** A release that copies of Elio can install themselves from also carries `update.json` and `update.json.sig`. The workflow writes them with `build/update-manifest.sh` and signs them with the private key in the repository secret `UPDATE_SIGNING_KEY`; the matching public key is in `src/Elio.Core/update-keys.txt`, built into every copy. Make the key pair once with `sh build/update-key.sh <where to write the private key>`, put the private key in the secret, keep a copy somewhere safe, and commit the public key. Without the secret a release is still published, and copies of Elio only announce it. Only the Windows zip, the macOS zips and the Linux tar.gz files are installed from; a .deb, which belongs to the package manager, and the Android package are not. A pre-release is announced to nobody and installed by nobody.
+**Updates from inside the app.** A release that copies of Elio can install themselves from also carries `update.json` and `update.json.sig`. The workflow writes them with `build/update-manifest.sh` and signs them with the private key in the repository secret `UPDATE_SIGNING_KEY`; the matching public key is in `src/Elio.Core/update-keys.txt`, built into every copy. Make the key pair once with `sh build/update-key.sh <where to write the private key>`, put the private key in the secret, keep a copy somewhere safe, and commit the public key. Without the secret a release is still published, and copies of Elio only announce it. Only the Windows zips, the macOS zips and the Linux tar.gz files are installed from, each copy from the one built for its own system and processor, so a copy on Windows on ARM takes the ARM64 zip and never the x64 one. A .deb, which belongs to the package manager, an AppImage and the Android package are not installed from: copies installed that way only announce a release. A pre-release is announced to nobody and installed by nobody.
 
 ### Environment variables
 
@@ -471,7 +504,7 @@ The container listens on plain HTTP on port 8080, so put a reverse proxy with HT
 | `Sync__Localtonet` | Where proofs are verified. Defaults to `https://localtonet.com`; leave empty to turn Localtonet sign-in off |
 | `Sync__StaticTokens` | For running without Localtonet: `token=account` pairs separated by semicolons |
 | `Sync__Database` | The SQLite file. `/data/sync.db` in the container |
-| `Sync__MaxBytes` | The most data one account may store. Defaults to 4 MB |
+| `Sync__MaxBytes` | How much one account may store. The encrypted library and keyring arrive as base64 text, so together they may be up to twice this many characters. Defaults to 4 MB |
 | `Sync__MaxVaults` | How many stores of data the server keeps, for everyone together. Defaults to 100000 |
 | `Sync__VaultIdleDays` | Stores not read or written for this many days are removed. Defaults to 0, which keeps them for ever |
 | `Sync__BehindProxy` | `true` when a reverse proxy is in front and passes `X-Forwarded-For` |
@@ -508,11 +541,12 @@ Publishing it is described in [web/README.md](web/README.md).
 | `web/Elio.Web` | The website |
 | `vendor/SSH.NET` | Elio's copy of SSH.NET, with the changes listed in its README |
 | `docs` | The plugin protocol, an example plugin and the pictures on this page |
+| `tests/Elio.Tests` | The tests, which touch neither the network nor your own Elio data |
 | `build` | Scripts that build libghostty-vt and package the Linux and macOS apps |
 
 ## Contributing
 
-Issues and pull requests are welcome. Translations are plain JSON files in `src/Elio.Core/Languages`, one per language, mapping the English text to the translated one; corrections from native speakers are especially appreciated.
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) says how to build and test Elio, add a translation and send a pull request, and everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md). What changed in each release is in [CHANGELOG.md](CHANGELOG.md). Translations are plain JSON files in `src/Elio.Core/Languages`, one per language, mapping the English text to the translated one; corrections from native speakers are especially appreciated.
 
 ## License
 

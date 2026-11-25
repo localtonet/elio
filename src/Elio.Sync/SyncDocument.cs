@@ -24,6 +24,12 @@ public sealed class SyncDocument
     public Dictionary<Guid, VaultEntry> Secrets { get; set; } = [];
     public Dictionary<Guid, DateTime> SecretsDeleted { get; set; } = [];
 
+    /// <summary>Saved workspaces. Null in a copy written before they were synced, which then says nothing about them.</summary>
+    public List<SavedWorkspace>? Workspaces { get; set; }
+
+    /// <summary>When each workspace was removed.</summary>
+    public Dictionary<Guid, DateTime>? WorkspacesDeleted { get; set; }
+
     /// <summary>A copy that shares nothing with the original, so the live library can't change under a sync.</summary>
     public SyncDocument Clone() =>
         JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(this, SyncJson.Default.SyncDocument), SyncJson.Default.SyncDocument)!;
@@ -37,6 +43,7 @@ public sealed class SyncDocument
 [JsonSerializable(typeof(Snippet))]
 [JsonSerializable(typeof(Identity))]
 [JsonSerializable(typeof(VaultEntry))]
+[JsonSerializable(typeof(SavedWorkspace))]
 internal sealed partial class SyncJson : JsonSerializerContext;
 
 /// <summary>
@@ -52,6 +59,7 @@ public static class SyncMerge
     {
         var deleted = MergeRemovals(local.Deleted, remote.Deleted, now);
         var secretsDeleted = MergeRemovals(local.SecretsDeleted, remote.SecretsDeleted, now);
+        var workspacesDeleted = MergeRemovals(local.WorkspacesDeleted ?? [], remote.WorkspacesDeleted ?? [], now);
 
         return new SyncDocument
         {
@@ -69,8 +77,15 @@ public static class SyncMerge
                 p => p.Key,
                 p => p.Value.ModifiedUtc,
                 secretsDeleted,
-                null).ToDictionary(p => p.Key, p => p.Value),
+                null,
+
+                // Two copies changed at the same moment are settled by what they hold, so every device keeps the same one.
+                p => p.Value.Secret).ToDictionary(p => p.Key, p => p.Value),
             SecretsDeleted = secretsDeleted,
+
+            // A copy from before workspaces were synced has none to offer, and takes none away.
+            Workspaces = MergeItems(local.Workspaces ?? [], remote.Workspaces ?? [], w => w.Id, w => w.ChangedUtc, workspacesDeleted, SyncJson.Default.SavedWorkspace),
+            WorkspacesDeleted = workspacesDeleted,
         };
     }
 
@@ -86,7 +101,7 @@ public static class SyncMerge
         return merged;
     }
 
-    private static List<T> MergeItems<T>(List<T> local, List<T> remote, Func<T, Guid> idOf, Func<T, DateTime> timeOf, Dictionary<Guid, DateTime> deleted, JsonTypeInfo<T>? type)
+    private static List<T> MergeItems<T>(List<T> local, List<T> remote, Func<T, Guid> idOf, Func<T, DateTime> timeOf, Dictionary<Guid, DateTime> deleted, JsonTypeInfo<T>? type, Func<T, string>? contentOf = null)
     {
         var mine = local.GroupBy(idOf).ToDictionary(g => g.Key, g => g.First());
         var theirs = remote.GroupBy(idOf).ToDictionary(g => g.Key, g => g.First());
@@ -96,7 +111,7 @@ public static class SyncMerge
         {
             bool haveMine = mine.TryGetValue(id, out T? a);
             bool haveTheirs = theirs.TryGetValue(id, out T? b);
-            T winner = !haveTheirs ? a! : !haveMine ? b! : Newer(a!, b!, timeOf, type);
+            T winner = !haveTheirs ? a! : !haveMine ? b! : Newer(a!, b!, timeOf, type, contentOf);
 
             // An item changed after it was removed has been brought back on purpose.
             if (deleted.TryGetValue(id, out DateTime removedAt))
@@ -112,10 +127,11 @@ public static class SyncMerge
     }
 
     // Ties are broken by content, so every device picks the same one.
-    private static T Newer<T>(T a, T b, Func<T, DateTime> timeOf, JsonTypeInfo<T>? type)
+    private static T Newer<T>(T a, T b, Func<T, DateTime> timeOf, JsonTypeInfo<T>? type, Func<T, string>? contentOf)
     {
         int byTime = timeOf(a).CompareTo(timeOf(b));
         if (byTime != 0) return byTime > 0 ? a : b;
+        if (contentOf is not null) return string.CompareOrdinal(contentOf(a), contentOf(b)) >= 0 ? a : b;
         if (type is null) return a;
         return string.CompareOrdinal(JsonSerializer.Serialize(a, type), JsonSerializer.Serialize(b, type)) >= 0 ? a : b;
     }

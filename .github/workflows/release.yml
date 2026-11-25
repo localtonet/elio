@@ -1,4 +1,4 @@
-# Builds Elio for Windows, Linux, macOS and Android and publishes a GitHub release.
+# Builds Elio for Windows, Linux, macOS and Android, publishes a GitHub release, and sends the iOS app to TestFlight.
 #
 # Push a tag such as v1.2.3 to release. A tag with a hyphen (v1.2.3-beta.1) is published as a pre-release.
 # Running the workflow by hand builds everything and keeps the files as workflow artifacts, without a release.
@@ -9,6 +9,14 @@
 # The Android package is signed with the release key when these repository secrets exist, and with a
 # throwaway debug key otherwise (such a package installs, but cannot be updated by a later build):
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#
+# The iOS app is built, signed and uploaded to TestFlight only when all of these repository secrets exist. Without
+# them the "ios" job is skipped with a warning, and the rest of the release goes out as before:
+#   IOS_CERTIFICATE_BASE64 (an "Apple Distribution" certificate with its private key, as .p12), IOS_CERTIFICATE_PASSWORD,
+#   IOS_PROVISIONING_PROFILE_BASE64 (an App Store provisioning profile for sh.elio.app, the .mobileprovision file),
+#   APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, and APP_STORE_CONNECT_KEY (the contents of the
+#   AuthKey_<key id>.p8 file of an App Store Connect API key, with the App Manager role)
+# A tag sends the build to TestFlight; a run by hand only builds and signs it and keeps the .ipa as a workflow artifact.
 #
 # What lets copies of Elio update themselves is a signed manifest (update.json) of the release. It is signed with the
 # private key in the repository secret UPDATE_SIGNING_KEY, whose public half is in src/Elio.Core/update-keys.txt and so
@@ -44,6 +52,11 @@ jobs:
       - name: Build for Windows and Linux
         run: sh build/native.sh win-x64 linux-x64 linux-arm64
 
+      # Kept apart, as Android is below: trouble with Windows on ARM costs that build, not the others.
+      - name: Build for Windows on ARM
+        continue-on-error: true
+        run: sh build/native.sh win-arm64
+
       # Kept apart so that trouble with the NDK costs the Android package, not the desktop builds.
       - name: Build for Android
         continue-on-error: true
@@ -64,11 +77,17 @@ jobs:
         include:
           - rid: win-x64
             os: windows-latest
+          # Windows on ARM, published from an x64 runner as linux-arm64 is. Optional: when it fails, the release goes
+          # out without it, and a copy on ARM that tries to update says the release has no build for its system.
+          - rid: win-arm64
+            os: windows-latest
+            optional: true
           - rid: linux-x64
             os: ubuntu-latest
           - rid: linux-arm64
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional == true }}
     defaults:
       run:
         shell: bash
@@ -84,25 +103,46 @@ jobs:
           name: native
           path: native/out
 
+      # The project leaves out an engine that is missing, and a program without it starts and then fails on its first
+      # terminal. A build stops here instead of making one.
+      - name: Check the terminal engine was built
+        run: |
+          case "${{ matrix.rid }}" in
+            win-*) engine=native/out/${{ matrix.rid }}/bin/ghostty-vt.dll ;;
+            *) engine=native/out/${{ matrix.rid }}/lib/libghostty-vt.so ;;
+          esac
+          test -f "$engine" || { echo "::error::libghostty-vt was not built for ${{ matrix.rid }}"; exit 1; }
+
       - name: Publish
         run: dotnet publish src/Elio.Desktop -c Release -r ${{ matrix.rid }} -p:Version="${RAW_VERSION#v}" -o publish
 
+      # The Windows zips hold elio-<version>-<rid>/elio.exe, which the in-app updater and the package managers look for.
       - name: Package
         run: |
           version=${RAW_VERSION#v}
           name=elio-$version-${{ matrix.rid }}
           mkdir "$name" dist
           cp LICENSE NOTICE "$name/"
-          if [ "${{ matrix.rid }}" = win-x64 ]; then
-            cp publish/elio.exe "$name/"
-            7z a -tzip "dist/$name.zip" "$name" > /dev/null
-          else
-            cp publish/elio "$name/"
-            chmod +x "$name/elio"
-            tar -czf "dist/$name.tar.gz" "$name"
-            sh build/package-deb.sh "$version" ${{ matrix.rid }} publish dist
-          fi
+          case "${{ matrix.rid }}" in
+            win-*)
+              cp publish/elio.exe "$name/"
+              7z a -tzip "dist/$name.zip" "$name" > /dev/null
+              ;;
+            *)
+              cp publish/elio "$name/"
+              chmod +x "$name/elio"
+              tar -czf "dist/$name.tar.gz" "$name"
+              sh build/package-deb.sh "$version" ${{ matrix.rid }} publish dist
+              ;;
+          esac
           ls -l dist
+
+      # Kept apart so that trouble with appimagetool costs the AppImage, not the tar.gz and the .deb. An AppImage does
+      # not update itself: like the .deb, it is not in update.json, and Elio started from one only announces a release.
+      - name: AppImage
+        if: ${{ startsWith(matrix.rid, 'linux-') }}
+        continue-on-error: true
+        run: sh build/package-appimage.sh "${RAW_VERSION#v}" ${{ matrix.rid }} publish dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -235,6 +275,136 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # Whether the iOS app can be signed and sent: secrets cannot decide whether a job runs, so this small job looks at
+  # them, and the Mac is only started when all of them are there (see the top of this file).
+  ios-secrets:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+        run: |
+          missing=
+          for name in IOS_CERTIFICATE_BASE64 IOS_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE_BASE64 \
+                      APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::The iOS app was not built or sent to TestFlight, because these secrets are not configured:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The iPhone and iPad app, built and signed on a Mac and uploaded to TestFlight, from where it is tested and sent to
+  # the App Store by hand. It is not put on the releases page: a build signed for the App Store installs from nowhere else.
+  ios:
+    needs: ios-secrets
+    if: ${{ needs.ios-secrets.outputs.ready == 'true' }}
+    runs-on: macos-latest
+    env:
+      # The Xcode the .NET iOS workload was made for. Empty keeps the runner's default; when the build says it needs
+      # another, name it as /Applications names it on the runner (26.1 for Xcode_26.1.app).
+      XCODE_VERSION: ''
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Choose Xcode
+        run: |
+          if [ -n "$XCODE_VERSION" ]; then sudo xcode-select -s "/Applications/Xcode_$XCODE_VERSION.app"; fi
+          xcodebuild -version
+
+      # The engine is linked into the app, so it is built here, on the Mac, as the macOS one is.
+      - name: Build the terminal engine
+        run: sh build/native-apple.sh ios
+
+      # The project leaves the engine out when the file is missing, and the app would start and then fail.
+      - name: Check the terminal engine was built
+        run: |
+          test -f native/out/ios/ghostty-vt.xcframework/ios-arm64/libghostty-vt-fat.a \
+            || { echo "::error::libghostty-vt was not built for iOS"; exit 1; }
+
+      - run: dotnet workload install ios
+
+      - name: Import the signing certificate and the provisioning profile
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          keychain=$RUNNER_TEMP/elio-ios.keychain-db
+          password=$(uuidgen)
+          echo "$CERTIFICATE_BASE64" | base64 -d > "$RUNNER_TEMP/elio-ios.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/elio-ios.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/elio-ios.p12"
+
+          identity=$(security find-identity -v -p codesigning "$keychain" | grep -o -E '"(Apple|iPhone) Distribution: [^"]+"' | head -1 | tr -d '"')
+          [ -n "$identity" ] || { echo "::error::IOS_CERTIFICATE_BASE64 holds no Apple Distribution certificate with its private key."; exit 1; }
+          echo "SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+          # The build finds the profile by its UUID, in the folders Xcode keeps profiles in.
+          echo "$PROFILE_BASE64" | base64 -d > "$RUNNER_TEMP/elio.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/elio.mobileprovision" > "$RUNNER_TEMP/elio-profile.plist"
+          uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/elio-profile.plist")
+          for folder in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$folder"
+            cp "$RUNNER_TEMP/elio.mobileprovision" "$folder/$uuid.mobileprovision"
+          done
+          echo "PROFILE_UUID=$uuid" >> "$GITHUB_ENV"
+
+      # App Store Connect takes a version of three numbers, so a pre-release's "-beta.1" is left out of it, and a build
+      # number that grows with every upload, for which the run number serves as it does for Android. A comma would
+      # end an MSBuild property, and certificate names such as "Acme, Inc." have one, so it is written as %2C.
+      - name: Publish
+        run: |
+          version=${RAW_VERSION#v}
+          short=${version%%[-+]*}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $short" -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" src/Elio.iOS/Info.plist
+          dotnet publish src/Elio.iOS -c Release -r ios-arm64 "-p:CodesignKey=${SIGN_IDENTITY//,/%2C}" "-p:CodesignProvision=$PROFILE_UUID" -o publish
+          ipa=$(find publish src/Elio.iOS/bin -name '*.ipa' 2> /dev/null | head -1 || true)
+          [ -n "$ipa" ] || { echo "::error::The build left no .ipa."; exit 1; }
+          mkdir dist
+          cp "$ipa" "dist/elio-$version-ios.ipa"
+          ls -l dist
+
+      # altool finds the API key by its id, in a file named the way App Store Connect named it, in this folder.
+      - name: Send to TestFlight
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+        run: |
+          keys=$HOME/.appstoreconnect/private_keys
+          mkdir -p "$keys"
+          trap 'rm -f "$keys/AuthKey_$KEY_ID.p8"' EXIT
+          (umask 077 && printf '%s\n' "$KEY" > "$keys/AuthKey_$KEY_ID.p8")
+          xcrun altool --upload-app --type ios --file dist/*.ipa --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      # Not named release-*, so that the release job does not put it on the releases page.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-app
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     needs: [desktop, macos, android]
     # A failed Android or macOS build still lets the Windows and Linux builds out.
@@ -314,7 +484,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir dist
-          for name in elio-win-x64.zip elio-osx-arm64.zip elio-osx-x64.zip; do
+          for name in elio-win-x64.zip elio-win-arm64.zip elio-osx-arm64.zip elio-osx-x64.zip; do
             gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir dist || true
           done
           ls -l dist

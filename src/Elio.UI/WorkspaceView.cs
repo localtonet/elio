@@ -669,6 +669,10 @@ public sealed partial class WorkspaceView : UserControl
     private readonly TextBlock _empty = new() { Text = AppServices.MobileLayout ? L.T("Tap a server in the list to connect.") : L.T("Double-click a server on the left to connect."), Foreground = ElioColors.TextMuted, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
     private readonly Control _emptyState;
     private readonly Dictionary<Guid, string> _sessionSecrets = [];
+
+    // Passwords fetched from a password manager for a reference the vault holds. Kept for this window only, and never
+    // written to the vault, which keeps the reference.
+    private readonly Dictionary<Guid, string> _managedSecrets = [];
     private readonly SemaphoreSlim _hostKeyQuestion = new(1, 1);
     private ShortcutMap _shortcuts = new(AppServices.Settings.Shortcuts);
     private readonly TextBlock _broadcastText = new() { Foreground = ElioColors.AccentText, FontWeight = FontWeight.SemiBold, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
@@ -1200,6 +1204,46 @@ public sealed partial class WorkspaceView : UserControl
         }
     }
 
+    /// <summary>Compares the two sides of the current file pane.</summary>
+    public void CompareFilesInActive()
+    {
+        if (_current?.Active is FilesPane files) _ = files.View.CompareAsync();
+    }
+
+    /// <summary>Shows what synchronising the two sides of the current file pane would copy.</summary>
+    public void SynchroniseFilesInActive()
+    {
+        if (_current?.Active is FilesPane files) _ = files.View.SynchroniseAsync();
+    }
+
+    /// <summary>The session of the terminal in front, if there is one and it is connected.</summary>
+    public TerminalSession? ActiveSession => (_current?.ActiveTerminal as TerminalPane)?.View.Session;
+
+    /// <summary>Starts or stops recording the terminal in front, for playing back with asciinema.</summary>
+    public void ToggleRecording()
+    {
+        if (_current?.ActiveTerminal is TerminalPane active) ToggleRecording(active);
+    }
+
+    private void ToggleRecording(TerminalPane pane)
+    {
+        if (pane.View.Session is not TerminalSession session) return;
+
+        try
+        {
+            PrivateFiles.CreateDirectory(ElioPaths.LogDirectory);
+            string safeName = string.Concat(pane.Host.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+            string path = Path.Combine(ElioPaths.LogDirectory, $"{safeName}-{DateTime.Now:yyyyMMdd-HHmmss}.cast");
+            if (session.ToggleRecording(path, pane.Host.Name) is string saved)
+                ShowNotice(L.T("The recording was saved to {0}. Play it with asciinema play.", saved));
+            UpdateBar(pane);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _ = _dialogs.ShowMessageAsync(L.T("Could not record the terminal"), ex.Message);
+        }
+    }
+
     /// <summary>Checks how far a connection to the current pane's server gets.</summary>
     public Task DiagnoseActiveAsync() => _current is WorkspaceTab tab ? DiagnoseAsync(tab.Active.Host) : Task.CompletedTask;
 
@@ -1603,8 +1647,77 @@ public sealed partial class WorkspaceView : UserControl
 
     // What the vault holds under an id, or what was typed this session and not stored. The id is a server's, an
     // identity's, or the one a proxy password is filed under.
-    private string? SecretOf(Guid id) =>
-        _sessionSecrets.TryGetValue(id, out string? known) ? known : AppServices.Vault.Get(id);
+    private string? SecretOf(Guid id)
+    {
+        id = SecretIdOf(id);
+        return _managedSecrets.TryGetValue(id, out string? managed) ? managed
+            : _sessionSecrets.TryGetValue(id, out string? known) ? known
+            : AppServices.Vault.Get(id);
+    }
+
+    // An unsaved copy of a server, such as one that opens a shell in a Docker container on it, logs in with what is
+    // kept for the server it was copied from.
+    private readonly Dictionary<Guid, Guid> _secretsOf = [];
+
+    private Guid SecretIdOf(Guid id) => _secretsOf.TryGetValue(id, out Guid original) ? original : id;
+
+    /// <summary>
+    /// Opens an unsaved copy of a saved server in a new tab. The copy logs in with what is saved for the original:
+    /// its password, and its proxy's password.
+    /// </summary>
+    public Task<TerminalPane?> OpenCopyAsync(HostEntry original, HostEntry copy)
+    {
+        _secretsOf[copy.Id] = original.Id;
+        _secretsOf[ProxySettings.SecretId(copy.Id)] = ProxySettings.SecretId(original.Id);
+        return OpenAsync(copy);
+    }
+
+    /// <summary>
+    /// Fetches, for every server along the path, the passwords that the vault keeps as a reference to a password manager
+    /// (op://… for 1Password, bw://… for Bitwarden). False if one could not be had; the user has been told why.
+    /// </summary>
+    private async Task<bool> FetchManagedSecretsAsync(HostEntry host)
+    {
+        if (!AppServices.Vault.IsAvailable) return true;
+
+        List<HostEntry> path;
+        try
+        {
+            path = PathOf(host);
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+
+        foreach (HostEntry step in path)
+        {
+            ResolvedHost resolved = Resolve(step);
+            var ids = new List<Guid> { step.Id };
+            if (resolved.Identity is { } identity) ids.Add(identity.Id);
+            if (resolved.ProxyOwner is Guid owner) ids.Add(ProxySettings.SecretId(owner));
+
+            foreach (Guid id in ids)
+            {
+                // Fetched afresh for each connection, so a password changed in the manager is used at once. A reference
+                // may also have been typed this session instead of a password.
+                Guid kept = SecretIdOf(id);
+                _managedSecrets.Remove(kept);
+                string? stored = _sessionSecrets.TryGetValue(kept, out string? typed) ? typed : AppServices.Vault.Get(kept);
+                try
+                {
+                    if (await PasswordManagers.ResolveStoredAsync(stored, CancellationToken.None) is string fetched) _managedSecrets[kept] = fetched;
+                }
+                catch (PasswordManagerException ex)
+                {
+                    await _dialogs.ShowMessageAsync(step.Name, ex.Message);
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>What a server connects with, its group's defaults and its identity taken into account.</summary>
     private static ResolvedHost Resolve(HostEntry host) => ConnectionResolver.Resolve(host, AppServices.Library);
@@ -1622,16 +1735,20 @@ public sealed partial class WorkspaceView : UserControl
         if (answer.Remember && AppServices.Vault.IsAvailable) AppServices.Vault.Set(identity.Id, stored);
     }
 
+    // A copy's password is the original server's, so it is kept, and forgotten, under the original's id.
     private void Remember(HostEntry host, SecretAnswer answer)
     {
-        _sessionSecrets[host.Id] = answer.Secret;
-        if (answer.Remember && AppServices.Vault.IsAvailable) AppServices.Vault.Set(host.Id, answer.Secret);
+        Guid id = SecretIdOf(host.Id);
+        _sessionSecrets[id] = answer.Secret;
+        if (answer.Remember && AppServices.Vault.IsAvailable) AppServices.Vault.Set(id, answer.Secret);
     }
 
     private void Forget(HostEntry host)
     {
-        _sessionSecrets.Remove(host.Id);
-        AppServices.Vault.Remove(host.Id);
+        Guid id = SecretIdOf(host.Id);
+        _sessionSecrets.Remove(id);
+        _managedSecrets.Remove(id);
+        AppServices.Vault.Remove(id);
     }
 
     private async Task<bool> AskSecretAsync(HostEntry host, string message)
@@ -1776,9 +1893,17 @@ public sealed partial class WorkspaceView : UserControl
 
     private async Task<bool> EnsureSecretsAsync(HostEntry host)
     {
+        if (!await FetchManagedSecretsAsync(host)) return false;
+
+        bool asked = false;
         foreach (HostEntry step in MissingSecrets(host))
+        {
             if (!await AskSecretAsync(step, L.T("Password"))) return false;
-        return true;
+            asked = true;
+        }
+
+        // What was typed may itself be a reference to a password manager.
+        return !asked || await FetchManagedSecretsAsync(host);
     }
 
     // Every connection this window makes gets its path here: a terminal, the file panel, Mosh's login, a command
@@ -1843,6 +1968,7 @@ public sealed partial class WorkspaceView : UserControl
         menu.Add(MenuItemFor(L.T("Turn broadcast input on / off"), () => pane.Owner.ToggleBroadcast()));
         menu.Add(MenuItemFor(L.T("Include this pane in broadcast / leave it out"), () => pane.Owner.ToggleLeftOut(pane)));
         menu.Add(MenuItemFor(L.T("Save output / stop"), () => pane.Owner.ToggleOutputLog(pane)));
+        menu.Add(MenuItemFor(L.T("Record this terminal (asciinema) / stop"), () => pane.Owner.ToggleRecording(pane)));
         menu.Add(MenuItemFor(L.T("Take a picture of this terminal"), () => _ = pane.Owner.TakePictureAsync(pane)));
         if (open is null)
         {
@@ -1868,10 +1994,22 @@ public sealed partial class WorkspaceView : UserControl
         // These arrive on the thread output is read on. The pane may have moved to another window by then.
         session.Bell += () => Dispatcher.UIThread.Post(() => pane.Owner.OnAttention(pane, null));
         session.Notified += (title, body) => Dispatcher.UIThread.Post(() => pane.Owner.OnAttention(pane, body.Length > 0 ? body : title));
+        session.Watcher = AppServices.Triggers;
+        session.Triggered += hit =>
+        {
+            // A rule with a reply answers: what the user wrote is typed, with Enter. Others ask for attention.
+            if (hit.Reply is string reply) session.SendText(reply + "\r");
+            else Dispatcher.UIThread.Post(() => pane.Owner.OnAttention(pane, hit.Line));
+        };
         session.ProgressChanged += progress => Dispatcher.UIThread.Post(() => pane.Owner.OnProgress(pane, progress));
         if (pane.Host.Kind == HostKind.Local) session.WorkingDirectoryChanged += reported => Dispatcher.UIThread.Post(() => pane.Owner.OnDirectory(pane, reported));
 
         HostEntry host = pane.Host;
+
+        // A server set to keep its output does so for every session, from before the login script is typed.
+        if (host.LogOutput && session.LogPath is null) pane.Owner.ToggleOutputLog(pane);
+        if (host.RecordSessions && session.RecordingPath is null) pane.Owner.ToggleRecording(pane);
+
         if (host.Kind == HostKind.Ssh && !string.IsNullOrWhiteSpace(host.RemoteCommand)) session.SendText($"exec {host.RemoteCommand.Trim()}\r");
         if (!string.IsNullOrWhiteSpace(host.LoginScript)) session.SendText(host.LoginScript.ReplaceLineEndings("\r").TrimEnd('\r') + "\r");
     }
@@ -2115,6 +2253,7 @@ public sealed partial class WorkspaceView : UserControl
         if (pane.Note is { } note) parts.Add($"\u25cf {note}");
         if (session is not null && pane.View.GridSizeOnScreen is var (columns, rows)) parts.Add($"{columns}×{rows}");
         if (session?.LogPath is not null) parts.Add(L.T("● logging"));
+        if (session?.RecordingPath is not null) parts.Add(L.T("● recording"));
         if (pane.Shared?.Share is { IsRunning: true } share) parts.Add(L.T("● shared, watching: {0}", share.ViewerCount));
         if (pane.ForwardProblems.Count > 0) parts.Add(L.T("⚠ {0} forwards could not be set up: {1}", pane.ForwardProblems.Count, pane.ForwardProblems[0]));
 
@@ -2247,7 +2386,7 @@ public sealed partial class WorkspaceView : UserControl
             host,
             () => pane.RetryAttempt = 0,
             Report,
-            (path, policy) => SshTransport.ConnectAsync(path, columns, rows, policy, host.Forwards, new SshShellOptions(host.ForwardAgent, host.ForwardX11), cancellation),
+            (path, policy) => SshTransport.ConnectAsync(path, columns, rows, policy, host.Forwards, new SshShellOptions(host.ForwardAgent, host.ForwardX11, host.Environment, host.ShareConnection), cancellation),
             cancellation);
         pane.ForwardProblems = transport.ForwardProblems;
         pane.HideStatus();
@@ -2312,6 +2451,7 @@ public sealed partial class WorkspaceView : UserControl
                 string message = refused.Endpoint.Password is null ? L.T("Password") : L.T("Password not accepted, try again");
                 Forget(step);
                 if (!await AskSecretAsync(step, message)) throw GaveUp(L.T("Login cancelled."));
+                if (!await FetchManagedSecretsAsync(step)) throw GaveUp(L.T("Login cancelled."));
             }
             catch (LoginRefusedException refused) when (LoginOf(HostOf(refused.Endpoint)).Identity is Identity unwelcome)
             {

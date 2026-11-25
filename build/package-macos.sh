@@ -71,6 +71,27 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <true/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Elio connects to the servers and devices you add, which may be on your own network.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>sh.elio.app.links</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>elio</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>sh.elio.app.ssh</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>ssh</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 EOF

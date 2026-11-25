@@ -99,6 +99,18 @@ public sealed class HostEntry
     public List<PortForward> Forwards { get; set; } = [];
     public bool AutoReconnect { get; set; } = true;
 
+    /// <summary>How often a quiet SSH connection sends a keep-alive, in seconds. 0 uses Elio's usual 20.</summary>
+    public int KeepAliveSeconds { get; set; }
+
+    /// <summary>Whether every session with this server saves its output to a file in the logs folder, from the first byte.</summary>
+    public bool LogOutput { get; set; }
+
+    /// <summary>Whether every session with this server is recorded as an asciicast in the logs folder.</summary>
+    public bool RecordSessions { get; set; }
+
+    /// <summary>Whether new terminals to this server open over the connection already open to it, as OpenSSH's ControlMaster does.</summary>
+    public bool ShareConnection { get; set; }
+
     /// <summary>Line settings, for a serial entry.</summary>
     public SerialSettings? Serial { get; set; }
 
@@ -213,7 +225,18 @@ public sealed class Snippet
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>What is typed. Blanks written {{name}} or {{name:default}} are asked for first: see <see cref="SnippetTemplate"/>.</summary>
     public string Command { get; set; } = string.Empty;
+
+    /// <summary>The folder the snippet is listed under, such as "Docker". Null or empty lists it at the top.</summary>
+    public string? Folder { get; set; }
+
+    /// <summary>
+    /// The servers and groups the snippet is for, by id. Empty means every terminal. The palette offers a snippet for
+    /// a server only where it applies; the sidebar lists them all and says which they are for.
+    /// </summary>
+    public List<Guid> For { get; set; } = [];
     public DateTime ModifiedUtc { get; set; }
 }
 
@@ -264,6 +287,9 @@ public enum ProxyKind
     None,
     Socks5,
     Http,
+
+    /// <summary>A program on this computer carries the connection, as OpenSSH's ProxyCommand does.</summary>
+    Command,
 }
 
 /// <summary>A proxy to connect through. Its password is kept in the vault, never here.</summary>
@@ -273,6 +299,9 @@ public sealed class ProxySettings
     public string Host { get; set; } = string.Empty;
     public int Port { get; set; }
     public string User { get; set; } = string.Empty;
+
+    /// <summary>For <see cref="ProxyKind.Command"/>: the command line, with %h, %p and %r for the server's address, port and user.</summary>
+    public string? Command { get; set; }
 
     private static readonly byte[] SecretContext = "elio-proxy-secret"u8.ToArray();
 
@@ -468,6 +497,12 @@ public sealed class AppSettings : IVersionedFile
     public bool SummonFromTop { get; set; }
     public List<HighlightRule> Highlights { get; set; } = [];
 
+    /// <summary>
+    /// Words or regular expressions to watch every terminal's output for. A line that matches marks its tab and asks
+    /// for attention, the way a notification from the running program does.
+    /// </summary>
+    public List<string> Triggers { get; set; } = [];
+
     /// <summary>The Localtonet account Elio is signed in to, for showing. The key itself is in the vault.</summary>
     public string? LocaltonetAccount { get; set; }
 
@@ -497,6 +532,18 @@ public sealed class AppSettings : IVersionedFile
 
     /// <summary>Action name to key sequence, only for the shortcuts the user changed.</summary>
     public Dictionary<string, string> Shortcuts { get; set; } = [];
+
+    /// <summary>
+    /// The most that all downloads together may take, in KB a second (a KB being 1024 bytes). 0 means no limit. A copy
+    /// between two servers counts as a download and as an upload.
+    /// </summary>
+    public int DownloadLimitKb { get; set; }
+
+    /// <summary>The most that all uploads together may take, in KB a second. 0 means no limit.</summary>
+    public int UploadLimitKb { get; set; }
+
+    /// <summary>Whether comparing the two sides of the file screen goes through the folders below them as well.</summary>
+    public bool CompareSubfolders { get; set; }
 }
 
 /// <summary>One pane, or a division into two.</summary>
@@ -557,9 +604,16 @@ public sealed class SavedWorkspace
     public List<TabLayout> Tabs { get; set; } = [];
 
     public DateTime SavedUtc { get; set; }
+
+    /// <summary>When it was last saved or renamed, which is what sync compares. Files from before sync have only <see cref="SavedUtc"/>.</summary>
+    public DateTime ModifiedUtc { get; set; }
+
+    /// <summary>The time sync goes by: the later of the two, so a workspace saved before there was a separate time still counts as changed then.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime ChangedUtc => ModifiedUtc > SavedUtc ? ModifiedUtc : SavedUtc;
 }
 
-/// <summary>The workspaces saved on this device. They are not synced.</summary>
+/// <summary>The workspaces saved on this device. They travel with sync, like the servers they open.</summary>
 public sealed class WorkspaceFile : IVersionedFile
 {
     public const int CurrentVersion = 1;
@@ -567,6 +621,9 @@ public sealed class WorkspaceFile : IVersionedFile
     public int SchemaVersion { get; set; } = CurrentVersion;
     int IVersionedFile.SupportedVersion => CurrentVersion;
     public List<SavedWorkspace> Workspaces { get; set; } = [];
+
+    /// <summary>When each workspace was deleted, so that sync does not bring it back from another device.</summary>
+    public Dictionary<Guid, DateTime> Deleted { get; set; } = [];
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

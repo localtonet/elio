@@ -70,6 +70,11 @@ public sealed class FilesView : UserControl
     private FilePanel? _previewPanel;
     private FileEditorView? _editor;
 
+    // The last comparison of the two sides and the folders it was of, until either side is listed again.
+    private FolderComparison? _comparison;
+    private (string Left, string Right) _compared;
+    private CancellationTokenSource? _comparing;
+
     public FilesView(Func<CancellationToken, Task<SftpConnection>> connect, DialogHost dialogs) : this(new FileServer(string.Empty, connect), null, dialogs)
     {
     }
@@ -98,7 +103,7 @@ public sealed class FilesView : UserControl
             Remote.RowsDropped += rows => Upload(rows.Select(r => r.Path).ToList());
             Remote.PathsDropped += Upload;
             Remote.EditRequested += row => _ = EditAsync(row, _browse);
-            Transfers = new TransferListView(Queue);
+            Transfers = new TransferListView(Queue, dialogs);
         }
         else
         {
@@ -117,7 +122,7 @@ public sealed class FilesView : UserControl
             Remote.PathsDropped += Upload;
             Local.EditRequested += row => _ = EditAsync(row, _browseOther);
             Remote.EditRequested += row => _ = EditAsync(row, _browse);
-            Transfers = new TransferListView(Queue, server.Name, other.Name);
+            Transfers = new TransferListView(Queue, server.Name, other.Name, dialogs);
         }
 
         _lastUsed = Remote;
@@ -128,6 +133,10 @@ public sealed class FilesView : UserControl
             FilePanel side = panel;
             side.PreviewRequested += row => _ = PreviewAsync(side, row);
             side.EditorRequested += row => _ = OpenEditorAsync(side, row);
+            side.CompareMenuRequested += ShowCompareMenu;
+
+            // Once either side is listed again, what was compared may have changed, so the marks go from both.
+            side.Listed += OnListed;
         }
 
         // Hiding hidden files is one choice for both sides.
@@ -139,7 +148,17 @@ public sealed class FilesView : UserControl
         Remote.GotFocus += (_, _) => _lastUsed = Remote;
         KeyDown += (_, e) =>
         {
-            if (e.Handled || e.Key != Key.F || e.KeyModifiers != (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) return;
+            if (e.Handled) return;
+
+            // A comparison is stopped like any other job: neither side's list has a job of its own to take the key.
+            if (e.Key == Key.Escape && _comparing is not null)
+            {
+                e.Handled = true;
+                _comparing.Cancel();
+                return;
+            }
+
+            if (e.Key != Key.F || e.KeyModifiers != (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) return;
             e.Handled = true;
             ShowFind();
         };
@@ -270,6 +289,204 @@ public sealed class FilesView : UserControl
             if (job.Target == target.CurrentPath) _ = target.RefreshAsync(searchSubfolders: false);
         }
     }
+
+    private string SideName(FilePanel panel) =>
+        panel == Remote ? (_serverName.Length > 0 ? _serverName : L.T("the server")) : _otherName ?? L.T("this computer");
+
+    // A server's names are POSIX ones, and so are Linux's. Windows and macOS usually take "A" and "a" for one name, and are
+    // taken to: thinking two names clash when they do not only leaves a file uncopied, never lets one replace another.
+    private static bool CaseSensitive(IFileSource source) => source.IsRemote || OperatingSystem.IsLinux() || OperatingSystem.IsFreeBSD();
+
+    // The menu under either side's compare button.
+    private void ShowCompareMenu(Control anchor)
+    {
+        bool busy = _comparing is not null;
+        var compare = new MenuItem { Header = L.T("Compare folders"), IsEnabled = !busy, Tag = "compare-run" };
+        compare.Click += (_, _) => _ = CompareAsync();
+
+        // The menu stays open when this is ticked, so that the comparison can be started from it next.
+        var subfolders = new MenuItem { Header = L.T("Include subfolders"), ToggleType = MenuItemToggleType.CheckBox, IsChecked = AppServices.Settings.CompareSubfolders, StaysOpenOnClick = true, Tag = "compare-subfolders" };
+        subfolders.Click += (_, _) =>
+        {
+            bool on = !AppServices.Settings.CompareSubfolders;
+            AppServices.Settings.CompareSubfolders = on;
+            AppServices.SaveSettings();
+            subfolders.IsChecked = on;
+        };
+
+        var synchronise = new MenuItem { Header = L.T("Synchronise..."), IsEnabled = !busy, Tag = "compare-sync" };
+        synchronise.Click += (_, _) => _ = SynchroniseAsync();
+        var clear = new MenuItem { Header = L.T("Clear the marks"), IsEnabled = _comparison is not null, Tag = "compare-clear" };
+        clear.Click += (_, _) => EndComparison();
+
+        new ContextMenu { ItemsSource = new Control[] { compare, subfolders, new Separator(), synchronise, clear } }.Open(anchor);
+    }
+
+    private void OnListed()
+    {
+        // A comparison still running is of a folder that one side no longer shows.
+        if (_comparing is not null && (Local.CurrentPath, Remote.CurrentPath) != _compared) _comparing.Cancel();
+        EndComparison();
+    }
+
+    private void EndComparison()
+    {
+        _comparison = null;
+        Local.ShowMarks(null);
+        Remote.ShowMarks(null);
+    }
+
+    /// <summary>
+    /// Compares the folders the two sides show, and the folders below them when that is ticked, and marks on each side what
+    /// is only there, newer, older or otherwise not the same. Esc stops it.
+    /// </summary>
+    public async Task CompareAsync()
+    {
+        if (_comparing is not null) return;
+
+        string left = Local.CurrentPath;
+        string right = Remote.CurrentPath;
+
+        // Windows's list of drives is not a folder, and a server that was never reached has not shown one yet.
+        if (left.Length == 0 || right.Length == 0)
+        {
+            Local.ShowProblem(L.T("Open a folder on both sides first."));
+            Remote.ShowProblem(L.T("Open a folder on both sides first."));
+            return;
+        }
+
+        var comparing = new CancellationTokenSource();
+        _comparing = comparing;
+        _compared = (left, right);
+        EndComparison();
+
+        bool subfolders = AppServices.Settings.CompareSubfolders;
+        bool StillShown() => Local.CurrentPath == left && Remote.CurrentPath == right;
+        int seenLeft = 0, seenRight = 0;
+        void Show()
+        {
+            if (!StillShown() || comparing.IsCancellationRequested) return;
+
+            string text = L.T("Comparing... {0} items looked at  (Esc stops)", seenLeft + seenRight);
+            Local.ShowNotice(text);
+            Remote.ShowNotice(text);
+        }
+
+        string? failure = null;
+        async Task<FolderSnapshot> SnapshotAsync(FilePanel side, string path, Action<int> seen)
+        {
+            try
+            {
+                return await FolderSnapshot.TakeAsync(side.Source, path, subfolders, CaseSensitive(side.Source), new Progress<int>(seen), comparing.Token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+            {
+                // The other side's walk has nothing left to be compared with.
+                failure ??= $"{path}: {ex.Message}";
+                await comparing.CancelAsync();
+                throw;
+            }
+        }
+
+        Show();
+        try
+        {
+            FolderSnapshot[] snapshots = await Task.WhenAll(
+                SnapshotAsync(Local, left, n => { seenLeft = n; Show(); }),
+                SnapshotAsync(Remote, right, n => { seenRight = n; Show(); }));
+            FolderComparison comparison = await Task.Run(() => FolderComparison.Compare(snapshots[0], snapshots[1]), comparing.Token);
+            if (!StillShown()) return;
+
+            _comparison = comparison;
+            Local.ShowMarks(comparison.MarksFor(left: true));
+            Remote.ShowMarks(comparison.MarksFor(left: false));
+            Local.ShowNotice(Summary(comparison, left: true));
+            Remote.ShowNotice(Summary(comparison, left: false));
+        }
+        catch (Exception) when (failure is not null)
+        {
+            Local.ShowProblem(L.T("Could not compare: {0}", failure));
+            Remote.ShowProblem(L.T("Could not compare: {0}", failure));
+        }
+        catch (OperationCanceledException) when (comparing.IsCancellationRequested)
+        {
+            if (StillShown())
+            {
+                Local.ShowNotice(L.T("Stopped."));
+                Remote.ShowNotice(L.T("Stopped."));
+            }
+        }
+        finally
+        {
+            _comparing = null;
+            comparing.Dispose();
+        }
+    }
+
+    private static string Summary(FolderComparison comparison, bool left)
+    {
+        CompareTally tally = comparison.Tally(left);
+        string text = comparison.Items.Count == 0
+            ? (comparison.Subfolders ? L.T("Compared: both sides are the same, and so are the folders below.") : L.T("Compared: both sides are the same."))
+            : L.T("Compared: {0} only here, {1} newer here, {2} older here, {3} other differences.", tally.OnlyHere, tally.Newer, tally.Older, tally.Other);
+        if (comparison.LinksLeftOut > 0) text += " " + L.T("{0} links were left out.", comparison.LinksLeftOut);
+        if (comparison.Incomplete) text += " " + L.T("There was too much to look through all of it, so this is not the whole story.");
+        return text;
+    }
+
+    /// <summary>
+    /// Shows what synchronising the two sides would copy, comparing them first unless that was just done for the folders
+    /// shown, and puts the copies in the transfer queue once the user agrees. Nothing is ever deleted.
+    /// </summary>
+    public async Task SynchroniseAsync()
+    {
+        if (_comparing is not null) return;
+        if (_comparison is null || _compared != (Local.CurrentPath, Remote.CurrentPath)) await CompareAsync();
+        if (_comparison is not { } comparison) return;
+
+        if (comparison.Incomplete)
+        {
+            await _dialogs.ShowMessageAsync(L.T("Cannot synchronise"), L.T("The comparison could not look through everything, so what seems to be missing may only not have been seen. Compare a smaller folder, or leave out the subfolders."));
+            return;
+        }
+
+        (string left, string right) = _compared;
+        SyncPlan? plan = await _dialogs.AskSyncAsync(SideName(Local), SideName(Remote), (direction, replaceNewer) => SyncPlan.Build(comparison, direction, replaceNewer));
+        if (plan is null || plan.Copies.Count == 0) return;
+
+        // A job for each folder copied into, so that the list says where each lot goes. What is there is replaced, as
+        // the user saw in the list, by the same swap at the end as every other transfer: never half a file.
+        foreach (IGrouping<(bool ToRight, string Folder), SyncCopy> group in plan.Copies.GroupBy(c => (c.ToRight, c.Item.Folder)))
+        {
+            (bool toRight, string folder) = group.Key;
+            string target = Below(toRight ? Remote.Source : Local.Source, toRight ? right : left, folder);
+            List<FileRow> sources = group.Select(c => c.Source).ToList();
+
+            if (BetweenServers)
+            {
+                // The left side is the second server, the right side the first.
+                Queue.Copy(sources.Select(r => r.Remote!).ToList(), target, toRight ? TransferServer.Second : TransferServer.First, ConflictChoice.Overwrite);
+            }
+            else if (toRight)
+            {
+                Queue.Upload(sources.Select(r => r.Path).ToList(), target, whenExists: ConflictChoice.Overwrite);
+            }
+            else
+            {
+                Queue.Download(sources.Select(r => r.Remote!).ToList(), target, whenExists: ConflictChoice.Overwrite);
+            }
+        }
+
+        // The marks are about to be out of date.
+        EndComparison();
+        string queued = L.T("{0} items were put in the transfer queue.", plan.Copies.Count);
+        Local.ShowNotice(queued);
+        Remote.ShowNotice(queued);
+    }
+
+    // A folder below a side's top folder, from its path with / between the names.
+    private static string Below(IFileSource source, string root, string folder) =>
+        folder.Length == 0 ? root : folder.Split('/').Aggregate(root, source.Combine);
 
     private void ShowOverlay(Control view)
     {

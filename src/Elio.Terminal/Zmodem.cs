@@ -45,7 +45,9 @@ internal sealed class ZmodemDetector
             }
 
             if (value == Signature[_matched]) _matched++;
-            else _matched = value == Signature[0] ? 1 : 0;
+
+            // A '*' that breaks the match may still start one: after "**" a third keeps the last two, otherwise it is the first.
+            else _matched = value == Signature[0] ? (_matched == 2 ? 2 : 1) : 0;
         }
 
         return null;
@@ -256,7 +258,14 @@ internal sealed class ZmodemTransfer
         {
             byte value = await NextAsync().ConfigureAwait(false);
             if (value is 0x11 or 0x13 or 0x91 or 0x93) continue;
-            if (value != Dle) return value;
+            if (value != Dle)
+            {
+                _cancels = 0;
+                return value;
+            }
+
+            // ZDLE is the same byte as CAN, and lrzsz counts it: ZDLE and four CAN after it are five, and a cancel.
+            CountCancel(value);
 
             while (true)
             {
@@ -507,6 +516,13 @@ internal sealed class ZmodemTransfer
                             break;
                         }
 
+                        // A new file before the last one ended: the last one is closed as incomplete, never left open.
+                        if (file is not null)
+                        {
+                            _host.FinishFile(file, complete: false);
+                            file = null;
+                        }
+
                         (name, size) = ParseFileInfo(block.AsSpan(0, length));
                         file = await _host.AcceptFileAsync(name, size, _cancel.Token).ConfigureAwait(false);
                         position = 0;
@@ -597,7 +613,11 @@ internal sealed class ZmodemTransfer
         using var limit = new CancellationTokenSource(OverAndOutWait);
         try
         {
-            for (int i = 0; i < 2; i++)
+            // lrzsz ends the hex header before it with CR and LF, the LF with its top bit set. They belong to that
+            // header, not to the screen, and come before the two O's.
+            int lineEnds = 0;
+            int letters = 0;
+            while (letters < 2)
             {
                 if (_offset >= _current.Length)
                 {
@@ -605,8 +625,17 @@ internal sealed class ZmodemTransfer
                     _offset = 0;
                 }
 
-                if (_current[_offset] != (byte)'O') return;
+                byte value = _current[_offset];
+                if (letters == 0 && lineEnds < 2 && value is 0x0D or 0x0A or 0x8D or 0x8A)
+                {
+                    lineEnds++;
+                    _offset++;
+                    continue;
+                }
+
+                if (value != (byte)'O') return;
                 _offset++;
+                letters++;
             }
         }
         catch (Exception ex) when (ex is OperationCanceledException or ChannelClosedException)

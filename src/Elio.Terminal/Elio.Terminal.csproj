@@ -8,6 +8,7 @@
   <!-- Built by build/native.sh. -->
   <ItemGroup>
     <None Include="$(NativeOut)win-x64\bin\ghostty-vt.dll" Link="runtimes\win-x64\native\ghostty-vt.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(NativeOut)win-x64\bin\ghostty-vt.dll')" />
+    <None Include="$(NativeOut)win-arm64\bin\ghostty-vt.dll" Link="runtimes\win-arm64\native\ghostty-vt.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(NativeOut)win-arm64\bin\ghostty-vt.dll')" />
     <None Include="$(NativeOut)linux-x64\lib\libghostty-vt.so" Link="runtimes\linux-x64\native\libghostty-vt.so" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(NativeOut)linux-x64\lib\libghostty-vt.so')" />
     <None Include="$(NativeOut)linux-arm64\lib\libghostty-vt.so" Link="runtimes\linux-arm64\native\libghostty-vt.so" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(NativeOut)linux-arm64\lib\libghostty-vt.so')" />
     <!-- Built on a Mac by build/native-apple.sh. -->

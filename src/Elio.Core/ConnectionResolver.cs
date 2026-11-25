@@ -137,7 +137,8 @@ public static class ConnectionResolver
             if (mosh is null && group.UseMosh is bool groupMosh) (mosh, moshFrom) = (groupMosh, group);
         }
 
-        bool direct = proxy is null || proxy.Kind == ProxyKind.None || string.IsNullOrWhiteSpace(proxy.Host);
+        bool direct = proxy is null || proxy.Kind == ProxyKind.None
+            || (proxy.Kind == ProxyKind.Command ? string.IsNullOrWhiteSpace(proxy.Command) : string.IsNullOrWhiteSpace(proxy.Host));
         return new ResolvedHost
         {
             Host = host,

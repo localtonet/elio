@@ -13,7 +13,9 @@ public static class SshEndpoints
     public static SshEndpoint For(ResolvedHost resolved, Func<Guid, string?> secretOf)
     {
         ResolvedLogin login = ConnectionResolver.Login(resolved, secretOf);
-        return new SshEndpoint(resolved.Host.Address, resolved.Port, login.User, login.Password, login.KeyPath, login.KeyPassphrase, login.UseAgent, login.KeyText);
+        // A keep-alive more often than every five seconds is noise, and one rarer than an hour is no keep-alive at all.
+        TimeSpan? keepAlive = resolved.Host.KeepAliveSeconds > 0 ? TimeSpan.FromSeconds(Math.Clamp(resolved.Host.KeepAliveSeconds, 5, 3600)) : null;
+        return new SshEndpoint(resolved.Host.Address, resolved.Port, login.User, login.Password, login.KeyPath, login.KeyPassphrase, login.UseAgent, login.KeyText, KeepAlive: keepAlive);
     }
 
     /// <summary>
@@ -39,6 +41,7 @@ public static class SshEndpoints
         if (from.Proxy is not ProxySettings proxy || from.ProxyOwner is not Guid owner) return null;
 
         string? user = string.IsNullOrWhiteSpace(proxy.User) ? null : proxy.User.Trim();
+        if (proxy.Kind == ProxyKind.Command) return new SshProxy(ProxyKind.Command, string.Empty, 0, Command: proxy.Command?.Trim());
         return new SshProxy(proxy.Kind, proxy.Host.Trim(), proxy.Port, user, user is null ? null : secretOf(ProxySettings.SecretId(owner)));
     }
 }

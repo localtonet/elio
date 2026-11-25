@@ -362,6 +362,11 @@ public sealed class ShareRelayHost : IAsyncDisposable
         {
             // Disposed.
         }
+        catch (InvalidDataException ex)
+        {
+            // The server broke the rules of the wire. That ends the sharing like any other loss, and is said so.
+            reason = ex.Message;
+        }
         catch (Exception ex) when (ex is WebSocketException or IOException or ObjectDisposedException)
         {
             reason = L.T("The connection to the sync server was lost: {0}", ex.Message);

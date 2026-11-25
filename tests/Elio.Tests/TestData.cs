@@ -16,6 +16,9 @@ internal static class TestData
     [ModuleInitializer]
     internal static void Redirect()
     {
+        // Started as a program to play a plugin (see FakePlugin), the assembly runs no tests and needs no folder.
+        if (Environment.GetCommandLineArgs().Contains("fake-plugin")) return;
+
         Directory.CreateDirectory(Root);
         Environment.SetEnvironmentVariable("ELIO_DATA_DIR", Root);
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Delete(Root);

@@ -24,6 +24,17 @@ namespace Elio.Android;
     Categories = [Intent.CategoryDefault, Intent.CategoryBrowsable],
     DataScheme = "elio",
     DataHost = "sync")]
+
+// elio://connect/<server> and elio://workspace/<name>, and ssh:// links clicked in a browser or a chat. Elio asks before it follows one.
+[IntentFilter(
+    [Intent.ActionView],
+    Categories = [Intent.CategoryDefault, Intent.CategoryBrowsable],
+    DataSchemes = ["elio"],
+    DataHosts = ["connect", "workspace"])]
+[IntentFilter(
+    [Intent.ActionView],
+    Categories = [Intent.CategoryDefault, Intent.CategoryBrowsable],
+    DataScheme = "ssh")]
 public class MainActivity : AvaloniaMainActivity
 {
     private const int ScanRequest = 4711;

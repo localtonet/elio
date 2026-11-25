@@ -61,6 +61,12 @@ public static partial class HostImport
                 ForwardX11 = Yes(first.GetValueOrDefault("forwardx11")),
                 RemoteCommand = first.GetValueOrDefault("remotecommand"),
                 Forwards = forwards,
+                Environment = first.TryGetValue("setenv", out string? setEnv) ? ParseSetEnv(setEnv) : [],
+
+                // A jump host comes first when both are given, as it does in ssh when ProxyJump is read before ProxyCommand.
+                Proxy = !first.ContainsKey("proxyjump") && first.GetValueOrDefault("proxycommand") is { Length: > 0 } proxyCommand && !proxyCommand.Equals("none", StringComparison.OrdinalIgnoreCase)
+                    ? new ProxySettings { Kind = ProxyKind.Command, Command = proxyCommand }
+                    : null,
             };
             hosts.Add(host);
             if (first.TryGetValue("proxyjump", out string? jump) && !jump.Equals("none", StringComparison.OrdinalIgnoreCase)) jumpsByHost[host] = jump;
@@ -71,6 +77,30 @@ public static partial class HostImport
     }
 
     private static bool Yes(string? value) => string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Reads SetEnv's NAME=value words, where a value in double quotes may hold spaces.</summary>
+    public static Dictionary<string, string> ParseSetEnv(string text)
+    {
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        int i = 0;
+        while (i < text.Length)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+            var word = new System.Text.StringBuilder();
+            bool quoted = false;
+            for (; i < text.Length && (quoted || !char.IsWhiteSpace(text[i])); i++)
+            {
+                if (text[i] == '"') quoted = !quoted;
+                else word.Append(text[i]);
+            }
+
+            string variable = word.ToString();
+            int equals = variable.IndexOf('=');
+            if (equals > 0) variables.TryAdd(variable[..equals], variable[(equals + 1)..]);
+        }
+
+        return variables;
+    }
 
     private static List<ConfigBlock> ParseBlocks(string text, Func<string, IEnumerable<string>> readInclude)
     {

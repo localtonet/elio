@@ -25,15 +25,29 @@ public enum UpdateArchive
 public sealed record UpdateTarget(string AssetName, string ProgramName, UpdateArchive Archive)
 {
     /// <summary>The target for the system this program runs on, or null where Elio does not replace itself.</summary>
+    /// <remarks>
+    /// The processor is the one this program was built for, not the computer's: an x64 copy that Windows on ARM runs
+    /// for it stays an x64 copy, and an ARM64 copy is only ever given the ARM64 build.
+    /// </remarks>
     public static UpdateTarget? Current { get; } = OperatingSystem.IsWindows() ? For(OSPlatform.Windows, RuntimeInformation.ProcessArchitecture)
         : OperatingSystem.IsMacOS() ? For(OSPlatform.OSX, RuntimeInformation.ProcessArchitecture)
-        : OperatingSystem.IsLinux() ? For(OSPlatform.Linux, RuntimeInformation.ProcessArchitecture)
+        : OperatingSystem.IsLinux() ? For(OSPlatform.Linux, RuntimeInformation.ProcessArchitecture, Environment.GetEnvironmentVariable("APPIMAGE"))
         : null;
 
     /// <summary>The target for a system and a processor, or null for one that has no build that updates itself.</summary>
-    public static UpdateTarget? For(OSPlatform system, Architecture processor)
+    /// <param name="system">The operating system.</param>
+    /// <param name="processor">The processor the running program was built for.</param>
+    /// <param name="appImage">
+    /// The APPIMAGE environment variable, which an AppImage sets to its own path for the program it runs. Such a copy
+    /// runs from an image that is mounted read-only while it runs, and the file to replace would be the AppImage
+    /// itself, which is not what the tar.gz holds. Like a .deb, it is only told about a release.
+    /// </param>
+    public static UpdateTarget? For(OSPlatform system, Architecture processor, string? appImage = null)
     {
+        if (system == OSPlatform.Linux && !string.IsNullOrEmpty(appImage)) return null;
+
         if (system == OSPlatform.Windows && processor == Architecture.X64) return new("elio-win-x64.zip", "elio.exe", UpdateArchive.Zip);
+        if (system == OSPlatform.Windows && processor == Architecture.Arm64) return new("elio-win-arm64.zip", "elio.exe", UpdateArchive.Zip);
         if (system == OSPlatform.OSX && processor == Architecture.Arm64) return new("elio-osx-arm64.zip", "elio", UpdateArchive.MacApp);
         if (system == OSPlatform.OSX && processor == Architecture.X64) return new("elio-osx-x64.zip", "elio", UpdateArchive.MacApp);
         if (system == OSPlatform.Linux && processor == Architecture.X64) return new("elio-linux-x64.tar.gz", "elio", UpdateArchive.TarGz);

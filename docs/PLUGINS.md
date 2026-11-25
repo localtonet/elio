@@ -5,7 +5,8 @@ talks to over its standard input and output. Because it is a separate process, a
 or crashes takes only itself down.
 
 A complete example is in [`plugin-example`](plugin-example): copy that folder into the plugins
-folder and Elio gains a "Show the date" command.
+folder and Elio gains a "Show the date" command. A larger one, [`plugin-ask-claude`](plugin-ask-claude), asks Claude
+what the output in a terminal means, using the official Anthropic SDK for Python and your own API key.
 
 ## Where plugins live
 
@@ -122,6 +123,12 @@ order they were sent.
 | `clipboard/write` | `{"text": "..."}` | `{}` | Puts text on the clipboard. |
 | `openUrl` | `{"url": "https://..."}` | `{}` | Opens a web page. Only `http` and `https`. |
 | `prompt` | `{"title": "...", "placeholder": "..."}` | `{"text": "..."}` | Asks the user for a line of text. `text` is `null` if they backed out. `placeholder` is optional. |
+| `choose` | `{"title": "...", "choices": ["...", "..."]}` | `{"index": 0}` | Lets the user pick one of 1 to 500 lines, in a searchable list like the palette. `index` is `null` if they backed out. |
+| `servers/list` | `{}` | `{"servers": [...]}` | The saved servers: `name`, `kind`, `address`, `user` and `group` where there is one, and `tags`. Never a password, a key or anything else from the vault. |
+| `terminal/lastOutput` | `{}` | `{"text": "..."}` | What the last command in the active terminal printed. `null` when the shell there does not mark its commands (see **Mark commands in this shell** in the README). |
+| `terminal/connect` | `{"server": "..."}` | `{}` | Opens a saved server, by its name, in a new tab. Error `-32000` if there is no server by that name. |
+| `show` | `{"title": "...", "text": "..."}` | `{}` | Shows a longer text than `notify` can, in a window that scrolls and can be copied from. At most 256 KB is shown. |
+| `ping` | `{}` | `{}` | Does nothing, and says the command is still at work. A command waiting on something slow calls it now and then so that it is not taken to be stuck (see below). |
 
 ```json
 ← {"jsonrpc":"2.0","id":"a1","method":"prompt","params":{"title":"Branch to deploy"}}

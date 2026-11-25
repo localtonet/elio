@@ -99,7 +99,40 @@ internal static unsafe partial class Ghostty
     public const int StyleUnderlineShift = 8;
     public const ushort StyleUnderlineMask = 0x7 << StyleUnderlineShift;
 
+    // GhosttyKeyAction
+    public const int KeyActionRelease = 0;
     public const int KeyActionPress = 1;
+    public const int KeyActionRepeat = 2;
+
+    // GhosttyTerminalOption and GhosttyTerminalData: what the engine asks of the app when a program asks it
+    public const int TerminalOptSize = 7;
+    public const int TerminalOptDeviceAttributes = 9;
+    public const int TerminalDataKittyKeyboardFlags = 8;
+    public const int TerminalDataColorBackground = 19;
+    public const int TerminalDataKittyImageStorageLimit = 26;
+
+    /// <summary>GhosttyDeviceAttributes, with the primary, secondary and tertiary parts laid out one after another.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DeviceAttributes
+    {
+        public ushort ConformanceLevel;
+        public fixed ushort Features[64];
+        public ulong FeatureCount;
+        public ushort DeviceType;
+        public ushort FirmwareVersion;
+        public ushort RomCartridge;
+        public uint UnitId;
+    }
+
+    /// <summary>GhosttySizeReportSize: what the engine answers CSI 14 t, 16 t and 18 t with.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SizeReport
+    {
+        public ushort Rows;
+        public ushort Columns;
+        public uint CellWidth;
+        public uint CellHeight;
+    }
 
     public const int TerminalOptColorForeground = 12;
     public const int TerminalOptColorBackground = 13;
@@ -561,6 +594,11 @@ internal static unsafe partial class Ghostty
 
     [LibraryImport(Library, EntryPoint = "ghostty_grid_ref_row")]
     public static partial int GridRefRow(GridRef* reference, ulong* row);
+
+    // The address an OSC 8 hyperlink gives a cell, in UTF-8 and without a NUL at the end. A cell without one gives
+    // success and nothing written; a buffer that is too small gives OUT_OF_SPACE and the size it needs.
+    [LibraryImport(Library, EntryPoint = "ghostty_grid_ref_hyperlink_uri")]
+    public static partial int GridRefHyperlinkUri(GridRef* reference, byte* buffer, nuint capacity, nuint* written);
 
     [LibraryImport(Library, EntryPoint = "ghostty_grid_ref_graphemes")]
     public static partial int GridRefGraphemes(GridRef* reference, uint* buffer, nuint capacity, nuint* written);

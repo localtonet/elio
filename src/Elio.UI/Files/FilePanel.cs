@@ -37,6 +37,9 @@ public sealed class FilePanel : UserControl
     private static readonly StreamGeometry FolderIcon = StreamGeometry.Parse("M1 3h5l1.5 2H15v9H1z");
     private static readonly StreamGeometry FileIcon = StreamGeometry.Parse("M3 1h7l3 3v11H3z");
 
+    // Two arrows, one each way: the two sides held against each other.
+    private const string CompareIcon = "M3,5.5 H13 M10.5,3 L13,5.5 L10.5,8 M13,10.5 H3 M5.5,8 L3,10.5 L5.5,13";
+
     private readonly DialogHost _dialogs;
     private readonly ListBox _list;
     private readonly TextBox _path;
@@ -48,6 +51,11 @@ public sealed class FilePanel : UserControl
     private readonly Button _hiddenButton;
     private readonly TypeAhead _typeAhead = new();
     private readonly Button _foldersButton;
+    private readonly Button _compareButton;
+    private FilePanel? _counterpart;
+
+    // How each name compared with the other side, by name, until something lists this side again.
+    private IReadOnlyDictionary<string, FileMark>? _marks;
     private CancellationTokenSource? _operation;
     private CancellationTokenSource? _contentSearch;
     private List<FileRow>? _contentRows;
@@ -135,6 +143,11 @@ public sealed class FilePanel : UserControl
         _hiddenButton.Click += (_, _) => ToggleHidden();
         MarkHiddenButton();
 
+        // Only where there is another side to compare with.
+        _compareButton = ToolButton(CompareIcon, L.T("Compare and synchronise the two sides"), "panel-compare");
+        _compareButton.Click += (_, _) => CompareMenuRequested?.Invoke(_compareButton);
+        _compareButton.IsVisible = false;
+
         _find = new FileFindBar(AppServices.Settings.FileFilterWithRegex);
         _find.Changed += OnFindChanged;
         _find.Accepted += () => _ = AcceptFindAsync();
@@ -143,7 +156,7 @@ public sealed class FilePanel : UserControl
 
         // The buttons either side of the path, or under it when the panel is too narrow for all three in a row.
         _toolsLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 0, 6, 0), Children = { up, refresh, _foldersButton } };
-        _toolsRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(4, 0, 0, 0), Children = { _hiddenButton, find, newFolder } };
+        _toolsRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(4, 0, 0, 0), Children = { _compareButton, _hiddenButton, find, newFolder } };
         var tools = new Grid { Margin = new Thickness(8, 8, 8, 4), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), RowDefinitions = new RowDefinitions("Auto,Auto") };
         tools.Children.Add(_toolsLeft);
         tools.Children.Add(_path);
@@ -235,8 +248,36 @@ public sealed class FilePanel : UserControl
 
     public IFileSource Source { get; }
 
-    /// <summary>The panel on the other side, when both show servers. Rows dragged from it are copied here.</summary>
-    public FilePanel? Counterpart { get; set; }
+    /// <summary>The panel on the other side. Rows dragged from it are copied here, and the two can be compared.</summary>
+    public FilePanel? Counterpart
+    {
+        get => _counterpart;
+        set
+        {
+            _counterpart = value;
+            _compareButton.IsVisible = value is not null;
+        }
+    }
+
+    /// <summary>The user wants the menu for comparing and synchronising the two sides, under this button.</summary>
+    public event Action<Control>? CompareMenuRequested;
+
+    /// <summary>The folder was listed again, or another one was: what was compared before may no longer be so.</summary>
+    public event Action? Listed;
+
+    /// <summary>Marks the names in the list by how they compared with the other side, or takes the marks away.</summary>
+    public void ShowMarks(IReadOnlyDictionary<string, FileMark>? marks)
+    {
+        if (marks is null && _marks is null) return;
+
+        _marks = marks;
+
+        // The rows are made again with the marks in them, the way a change of columns does.
+        _list.ItemTemplate = MakeTemplate();
+    }
+
+    /// <summary>Puts a problem on the status line.</summary>
+    public void ShowProblem(string message) => ShowError(message);
 
     /// <summary>Whether a server dragged from the list may be dropped here, to show its files on this side.</summary>
     public bool AcceptsServers { get; set; }
@@ -391,7 +432,10 @@ public sealed class FilePanel : UserControl
 
         string suffix = row.IsLink ? " ↗" : string.Empty;
         bool found = _applied.TryFind(row.Name, out int start, out int length);
-        if (!found && row.Where is not { Length: > 0 } && !row.IsContentHit)
+
+        // A comparison speaks of the names in the folder shown, not of what a search found below it.
+        FileMark? mark = row.Where is null && !row.IsContentHit && _marks?.TryGetValue(row.Name, out FileMark m) == true ? m : null;
+        if (!found && row.Where is not { Length: > 0 } && !row.IsContentHit && mark is null)
         {
             cell.Text = row.Name + suffix;
             return cell;
@@ -415,9 +459,24 @@ public sealed class FilePanel : UserControl
         if (row.IsContentHit)
             runs.Add(new Run($"  :{row.Line}  {row.Snippet}") { Foreground = ElioColors.TextMuted, FontSize = ElioStyle.SmallFontSize });
 
+        if (mark is FileMark shown)
+            runs.Add(new Run("  " + MarkText(shown)) { Foreground = shown is FileMark.CaseConflict or FileMark.KindDiffers or FileMark.Unreadable ? ElioColors.Danger : ElioColors.Accent, FontSize = ElioStyle.SmallFontSize, FontWeight = FontWeight.Medium });
+
         cell.Inlines = runs;
         return cell;
     }
+
+    private static string MarkText(FileMark mark) => mark switch
+    {
+        FileMark.OnlyHere => L.T("only here"),
+        FileMark.Newer => L.T("newer here"),
+        FileMark.Older => L.T("older here"),
+        FileMark.SizeDiffers => L.T("same time, other size"),
+        FileMark.CaseConflict => L.T("name differs in case"),
+        FileMark.KindDiffers => L.T("a file on one side, a folder on the other"),
+        FileMark.Unreadable => L.T("could not be read"),
+        _ => L.T("differs inside"),
+    };
 
     private ContextMenu BuildMenu()
     {
@@ -444,7 +503,8 @@ public sealed class FilePanel : UserControl
         MenuItem paste = Item(L.T("Paste"), () => _ = PasteAsync());
         MenuItem duplicate = Item(L.T("Duplicate"), () => _ = DuplicateSelectedAsync());
         MenuItem rename = Item(L.T("Rename"), () => _ = RenameSelectedAsync());
-        MenuItem? permissions = Source is RemoteFileSource ? Item(L.T("Permissions"), () => _ = ChangePermissionsAsync()) : null;
+        // Not on Windows, whose files have no permissions of this kind: there is nothing for this computer's side to offer.
+        MenuItem? permissions = Source.CanChangeMode ? Item(L.T("Permissions"), () => _ = ChangePermissionsAsync()) : null;
         MenuItem delete = Item(L.T("Delete"), () => _ = DeleteSelectedAsync());
         MenuItem extractHere = Item(L.T("Extract here"), () => _ = ExtractAsync(here: true));
         MenuItem extractTo = Item(L.T("Extract to a new folder"), () => _ = ExtractAsync(here: false));
@@ -479,7 +539,7 @@ public sealed class FilePanel : UserControl
             copy.IsEnabled = cut.IsEnabled = duplicate.IsEnabled = delete.IsEnabled = real;
             rename.IsEnabled = real;
             rename.Header = rows.Count > 1 ? L.T("Rename several...") : L.T("Rename");
-            if (permissions is not null) permissions.IsEnabled = real && rows.Count == 1;
+            if (permissions is not null) permissions.IsEnabled = real;
             paste.IsEnabled = CanPaste();
             copyPath.IsEnabled = any;
 
@@ -588,6 +648,10 @@ public sealed class FilePanel : UserControl
             _path.Text = path;
             _rows = rows;
             _restore = selected;
+
+            // A comparison holds only for the listings it was made from. Marks left on a newer one would be guesses.
+            _marks = null;
+            Listed?.Invoke();
 
             if (!sameFolder)
             {
@@ -1345,26 +1409,36 @@ public sealed class FilePanel : UserControl
         await RunAsync(() => Source.RenameAsync(row, name, CancellationToken.None));
     }
 
+    // A job like the copies: shown on the status line as it goes, stopped with Esc, and what could not be changed told at the end.
     private async Task ChangePermissionsAsync()
     {
-        if (Source is not RemoteFileSource remote || Chosen().Count != 1) return;
-        FileRow row = Chosen()[0];
-        if (await _dialogs.AskTextAsync(L.T("Permissions"), L.T("Numeric permission (example: 644)"), OctalOf(row.Permissions), L.T("Apply")) is not string text) return;
+        IReadOnlyList<FileRow> rows = Chosen();
+        if (rows.Count == 0 || !Source.CanChangeMode) return;
 
-        if (text.Length != 3 || text.Any(c => c is < '0' or > '7'))
+        // What they have now is offered only when it is the same for all of them.
+        List<string> now = rows.Select(r => PermissionBits.DigitsOfLetters(r.Permissions)).Distinct().ToList();
+        bool folders = rows.Any(r => r.IsDirectory && !r.IsLink);
+        PermissionChoice? choice = await _dialogs.AskPermissionsAsync(What(rows), now is [string same] ? same : string.Empty, folders);
+        if (choice is null) return;
+
+        PermissionReport? report = null;
+        await WorkAsync(L.T("Changing permissions...  (Esc stops)"), async token =>
         {
-            ShowError(L.T("Permission must be three digits, for example 644."));
-            return;
-        }
+            var progress = new Progress<int>(done => ShowNotice(L.T("Changing permissions: {0} done  (Esc stops)", done)));
+            report = await PermissionChanger.ApplyAsync(Source, rows, choice, progress, token);
+            if (report.FailureCount > 0) return null;
 
-        await RunAsync(() => remote.ChangeModeAsync(row, short.Parse(text), CancellationToken.None));
-    }
+            string text = report.Changed > 0 ? L.T("Permissions changed on {0} items.", report.Changed) : L.T("Permissions changed.");
+            return report.LinksLeftOut > 0 ? text + " " + L.T("{0} links were left as they are.", report.LinksLeftOut) : text;
+        }, rows.Select(r => r.Name).ToList());
 
-    private static string OctalOf(string permissions)
-    {
-        if (permissions.Length != 9) return string.Empty;
-        int Digit(int start) => (permissions[start] == 'r' ? 4 : 0) + (permissions[start + 1] == 'w' ? 2 : 0) + (permissions[start + 2] == 'x' ? 1 : 0);
-        return $"{Digit(0)}{Digit(3)}{Digit(6)}";
+        if (report is not { FailureCount: > 0 } failed) return;
+
+        ShowError(L.T("{0} could not be changed.", failed.FailureCount));
+        string list = string.Join("\n", failed.Failures.Take(20));
+        if (failed.FailureCount > 20) list += "\n" + L.T("... and {0} more", failed.FailureCount - 20);
+        if (failed.GaveUp) list += "\n\n" + L.T("So many failed one after another that the rest was not tried.");
+        await _dialogs.ShowMessageAsync(L.T("Some permissions could not be changed"), list);
     }
 
     private async Task DeleteSelectedAsync()

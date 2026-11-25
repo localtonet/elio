@@ -1,0 +1,49 @@
+name: Feature request
+description: Something Elio does not do yet, or could do better.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. Please look through the [open issues](https://github.com/localtonet/elio/issues) first: if someone has asked for it already, a thumbs-up on that issue counts for more than a new one.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The task, and what gets in the way today. "I keep forty servers in groups and want to..." says more than the name of a feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like Elio to do
+      description: How it could work, as seen by the person using it. Where it would be (the palette, Settings, a right-click menu) and what it would be called.
+    validations:
+      required: true
+
+  - type: textarea
+    id: elsewhere
+    attributes:
+      label: How you do it now, or how another program does it
+      description: A workaround, or another terminal or SSH client that does this well.
+
+  - type: dropdown
+    id: systems
+    attributes:
+      label: Where you need it
+      multiple: true
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Android
+        - iPhone or iPad
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Helping
+      options:
+        - label: I would like to send a pull request for this. ([CONTRIBUTING.md](https://github.com/localtonet/elio/blob/main/CONTRIBUTING.md) says how.)

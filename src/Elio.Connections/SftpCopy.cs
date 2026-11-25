@@ -28,7 +28,8 @@ internal static class SftpCopy
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>Writes to a temporary name and swaps it in at the end, so a failed upload never damages what was there.</summary>
-    public static async Task UploadAsync(SftpClient client, string localPath, string remotePath, Action<long> setPosition, Action<long> add, CancellationToken cancellation)
+    /// <param name="limits">The speed limits the upload goes by, or null for none.</param>
+    public static async Task UploadAsync(SftpClient client, string localPath, string remotePath, Action<long> setPosition, Action<long> add, CancellationToken cancellation, IReadOnlyList<TransferThrottle>? limits = null)
     {
         string part = remotePath + PartSuffix;
         using SafeFileHandle source = File.OpenHandle(localPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous);
@@ -38,7 +39,7 @@ internal static class SftpCopy
 
         long start = await FindUploadStartAsync(client, read, size, part, cancellation).ConfigureAwait(false);
         setPosition(start);
-        await WritePartAsync(client, read, part, start, size, add, cancellation).ConfigureAwait(false);
+        await WritePartAsync(client, read, part, start, size, add, limits, cancellation).ConfigureAwait(false);
 
         // A new file takes its permissions from the local one where that means anything.
         await Task.Run(() => Publish(client, part, remotePath, File.GetLastWriteTimeUtc(localPath), OperatingSystem.IsWindows() ? null : DigitsOf(File.GetUnixFileMode(localPath))), cancellation).ConfigureAwait(false);
@@ -48,7 +49,8 @@ internal static class SftpCopy
     /// Copies a file from one server to another as it arrives, without keeping any of it on this computer. It uses the
     /// same temporary name, resuming and final swap as an upload.
     /// </summary>
-    public static async Task CopyAsync(SftpClient from, SftpClient to, string sourcePath, string targetPath, Action<long> setPosition, Action<long> add, CancellationToken cancellation)
+    /// <param name="limits">The speed limits the copy goes by, or null for none.</param>
+    public static async Task CopyAsync(SftpClient from, SftpClient to, string sourcePath, string targetPath, Action<long> setPosition, Action<long> add, CancellationToken cancellation, IReadOnlyList<TransferThrottle>? limits = null)
     {
         string part = targetPath + PartSuffix;
         SftpFileAttributes original = await from.GetAttributesAsync(sourcePath, cancellation).ConfigureAwait(false);
@@ -60,7 +62,7 @@ internal static class SftpCopy
 
         long start = await FindUploadStartAsync(to, read, size, part, cancellation).ConfigureAwait(false);
         setPosition(start);
-        await WritePartAsync(to, read, part, start, size, add, cancellation).ConfigureAwait(false);
+        await WritePartAsync(to, read, part, start, size, add, limits, cancellation).ConfigureAwait(false);
 
         await Task.Run(() => Publish(to, part, targetPath, original.LastWriteTimeUtc, ModeOf(original)), cancellation).ConfigureAwait(false);
     }
@@ -82,7 +84,7 @@ internal static class SftpCopy
                 return ValueTask.CompletedTask;
             };
 
-            await Task.Run(() => SendAsync(read, target, start, data.Length, static _ => { }, cancellation), cancellation).ConfigureAwait(false);
+            await Task.Run(() => SendAsync(read, target, start, data.Length, static _ => { }, null, cancellation), cancellation).ConfigureAwait(false);
         }
 
         SftpFileAttributes written = await client.GetAttributesAsync(part, cancellation).ConfigureAwait(false);
@@ -123,13 +125,13 @@ internal static class SftpCopy
     private delegate ValueTask ReadAt(Memory<byte> buffer, long offset, CancellationToken cancellation);
 
     /// <summary>Writes the rest of the source to the temporary file and checks that all of it is there.</summary>
-    private static async Task WritePartAsync(SftpClient client, ReadAt read, string part, long start, long size, Action<long> add, CancellationToken cancellation)
+    private static async Task WritePartAsync(SftpClient client, ReadAt read, string part, long start, long size, Action<long> add, IReadOnlyList<TransferThrottle>? limits, CancellationToken cancellation)
     {
         // Creating empties any leftover, and makes sure even a zero-length file exists.
         await using (SftpFileStream target = await client.OpenAsync(part, start == 0 ? FileMode.Create : FileMode.Open, FileAccess.Write, cancellation).ConfigureAwait(false))
         {
             // Sending waits for room in the connection's window without giving the thread back, so it gets its own.
-            await Task.Run(() => SendAsync(read, target, start, size, add, cancellation), cancellation).ConfigureAwait(false);
+            await Task.Run(() => SendAsync(read, target, start, size, add, limits, cancellation), cancellation).ConfigureAwait(false);
         }
 
         SftpFileAttributes written = await client.GetAttributesAsync(part, cancellation).ConfigureAwait(false);
@@ -137,9 +139,10 @@ internal static class SftpCopy
     }
 
     /// <summary>Sends the file as a stream of writes on one handle, without waiting for each to be confirmed before the next.</summary>
-    private static async Task SendAsync(ReadAt read, SftpFileStream target, long start, long size, Action<long> add, CancellationToken cancellation)
+    /// <param name="limits">Speed limits to keep to, or null for none. Each write waits for its turn under them before it goes.</param>
+    private static async Task SendAsync(ReadAt read, SftpFileStream target, long start, long size, Action<long> add, IReadOnlyList<TransferThrottle>? limits, CancellationToken cancellation)
     {
-        int piece = Math.Min(target.MaxWriteLength, MaxPiece);
+        int largest = Math.Min(target.MaxWriteLength, MaxPiece);
         var pending = new Queue<(Task Write, int Length)>(MaxPendingWrites);
         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReadBufferSize);
 
@@ -159,12 +162,16 @@ internal static class SftpCopy
                 int filled = (int)Math.Min(buffer.Length, size - offset);
                 await read(buffer.AsMemory(0, filled), offset, cancellation).ConfigureAwait(false);
 
-                for (int at = 0; at < filled; at += piece)
+                for (int at = 0; at < filled;)
                 {
                     while (pending.Count >= MaxPendingWrites || (pending.Count > 0 && pending.Peek().Write.IsCompleted)) await ConfirmOldestAsync().ConfigureAwait(false);
 
-                    int length = Math.Min(piece, filled - at);
+                    // Asked again for every piece, so that a limit changed during the transfer takes hold at once. Smaller
+                    // pieces only make less unconfirmed when a connection breaks, so resuming stays as safe as before.
+                    int length = Math.Min(TransferThrottle.PieceFor(limits, largest), filled - at);
+                    await TransferThrottle.WaitAsync(limits, length, cancellation).ConfigureAwait(false);
                     pending.Enqueue((target.WriteAtAsync(offset + at, buffer, at, length, cancellation), length));
+                    at += length;
                 }
 
                 offset += filled;
@@ -294,7 +301,12 @@ internal static class SftpCopy
     }
 
     /// <summary>Saves to a temporary name and moves it into place at the end.</summary>
-    public static async Task DownloadAsync(SftpClient client, string remotePath, string localPath, DateTime modifiedUtc, Action<long> setPosition, Action<long> add, CancellationToken cancellation)
+    /// <param name="limits">
+    /// The speed limits the download goes by, or null for none. The data is paid for as it is taken from the stream, which
+    /// asks the server for some of what follows before it is wanted: so a file can start out above the limit, and over the
+    /// whole of it keeps to it.
+    /// </param>
+    public static async Task DownloadAsync(SftpClient client, string remotePath, string localPath, DateTime modifiedUtc, Action<long> setPosition, Action<long> add, CancellationToken cancellation, IReadOnlyList<TransferThrottle>? limits = null)
     {
         string part = localPath + PartSuffix;
         long start = await FindDownloadStartAsync(client, remotePath, part, cancellation).ConfigureAwait(false);
@@ -312,8 +324,9 @@ internal static class SftpCopy
             try
             {
                 int read;
-                while ((read = await source.ReadAsync(buffer, cancellation).ConfigureAwait(false)) > 0)
+                while ((read = await source.ReadAsync(buffer.AsMemory(0, TransferThrottle.PieceFor(limits, buffer.Length)), cancellation).ConfigureAwait(false)) > 0)
                 {
+                    await TransferThrottle.WaitAsync(limits, read, cancellation).ConfigureAwait(false);
                     await target.WriteAsync(buffer.AsMemory(0, read), cancellation).ConfigureAwait(false);
                     add(read);
                 }

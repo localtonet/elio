@@ -10,4 +10,7 @@
     <EmbeddedResource Include="Languages\*.json" />
     <EmbeddedResource Include="update-keys.txt" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elio.Tests" />
+  </ItemGroup>
 </Project>

@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Elio.Core;
 
 namespace Elio.Desktop;
@@ -11,7 +12,12 @@ namespace Elio.Desktop;
 /// </summary>
 internal static class SingleInstance
 {
+    // An older copy only knows "open"; a newer one also takes "launch" followed by the arguments, as JSON, on the next line.
     private const string OpenRequest = "open";
+    private const string LaunchRequestLine = "launch";
+
+    // The arguments of one launch are a few hundred bytes. A line longer than this is not one.
+    private const int LongestArguments = 64 * 1024;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromMilliseconds(400);
 
     // Two copies with different data folders are different apps as far as this goes: a portable copy on a
@@ -24,13 +30,16 @@ internal static class SingleInstance
 
     /// <summary>Hands this launch to a copy that is already running.</summary>
     /// <returns>True if there was one, in which case this process has nothing left to do.</returns>
-    public static bool TryHandOver()
+    public static bool TryHandOver(LaunchRequest request)
     {
         try
         {
             using var pipe = new NamedPipeClientStream(".", PipeName(), PipeDirection.Out, PipeOptions.CurrentUserOnly);
             pipe.Connect(ConnectTimeout);
-            pipe.Write(Encoding.UTF8.GetBytes(OpenRequest + "\n"));
+            string message = request.Kind == LaunchKind.NewTab
+                ? OpenRequest + "\n"
+                : LaunchRequestLine + "\n" + JsonSerializer.Serialize(request.ToArguments().ToArray(), DesktopJsonContext.Default.StringArray) + "\n";
+            pipe.Write(Encoding.UTF8.GetBytes(message));
             pipe.Flush();
             return true;
         }
@@ -41,7 +50,7 @@ internal static class SingleInstance
     }
 
     /// <summary>Starts answering later launches. <paramref name="onOpen"/> is called on a background thread for each.</summary>
-    public static void Listen(Action onOpen)
+    public static void Listen(Action<LaunchRequest> onOpen)
     {
         var thread = new Thread(() =>
         {
@@ -54,7 +63,16 @@ internal static class SingleInstance
                     pipe.WaitForConnection();
 
                     using var reader = new StreamReader(pipe, Encoding.UTF8);
-                    if (reader.ReadLine() == OpenRequest) onOpen();
+                    switch (reader.ReadLine())
+                    {
+                        case OpenRequest:
+                            onOpen(LaunchRequest.NewTab);
+                            break;
+                        case LaunchRequestLine when ReadArguments(reader) is { } arguments:
+                            // Read the same way as a command line, so a copy started with nonsense cannot ask for more than a typed one could.
+                            onOpen(LaunchRequest.Parse(arguments));
+                            break;
+                    }
                 }
                 catch (IOException)
                 {
@@ -73,4 +91,27 @@ internal static class SingleInstance
         };
         thread.Start();
     }
+
+    private static string[]? ReadArguments(StreamReader reader)
+    {
+        var line = new StringBuilder();
+        int c;
+        while ((c = reader.Read()) >= 0 && c != '\n')
+        {
+            if (line.Length >= LongestArguments) return null;
+            line.Append((char)c);
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize(line.ToString(), DesktopJsonContext.Default.StringArray);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 }
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
+internal sealed partial class DesktopJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

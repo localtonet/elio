@@ -12,6 +12,20 @@ public static class TerminalLinks
     // Punctuation that ends a sentence around a link far more often than it ends the link.
     private static readonly char[] Trailing = ['.', ',', ';', ':', '!', '?', ')', ']', '}', '>'];
 
+    /// <summary>
+    /// The address of an OSC 8 hyperlink, if it is a web address. Anything else, such as file:, javascript: or an
+    /// address that starts another program, is not opened: the program that wrote it chose it, not the user.
+    /// </summary>
+    public static Uri? FromHyperlink(string? target)
+    {
+        if (string.IsNullOrWhiteSpace(target) || target.Any(char.IsControl)) return null;
+        return Uri.TryCreate(target.Trim(), UriKind.Absolute, out Uri? link)
+            && (link.Scheme == Uri.UriSchemeHttp || link.Scheme == Uri.UriSchemeHttps)
+            && link.Host.Length > 0
+            ? link
+            : null;
+    }
+
     /// <summary>The web address under one cell of a row, if there is one.</summary>
     /// <param name="cells">The row, one string per cell.</param>
     public static Uri? At(IReadOnlyList<string> cells, int column)

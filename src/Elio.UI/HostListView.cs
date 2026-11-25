@@ -115,6 +115,9 @@ public sealed class HostListView : UserControl
 
     public event Action<HostEntry>? FilesRequested;
 
+    /// <summary>The user wants a shell in one of the Docker containers running on this server.</summary>
+    public event Action<HostEntry>? DockerRequested;
+
     /// <summary>The user wants this server's files beside those of another server, yet to be picked.</summary>
     public event Action<HostEntry>? FilesWithAnotherRequested;
 
@@ -431,7 +434,7 @@ public sealed class HostListView : UserControl
 
     private async Task AddSnippetAsync()
     {
-        if (await _dialogs.EditSnippetAsync(null) is not Snippet created) return;
+        if (await _dialogs.EditSnippetAsync(null, SnippetFolders()) is not Snippet created) return;
         created.ModifiedUtc = DateTime.UtcNow;
         _library.Snippets.Add(created);
         Commit();
@@ -439,11 +442,20 @@ public sealed class HostListView : UserControl
 
     private async Task EditSnippetAsync(Snippet snippet)
     {
-        if (await _dialogs.EditSnippetAsync(snippet) is not Snippet edited) return;
+        if (await _dialogs.EditSnippetAsync(snippet, SnippetFolders()) is not Snippet edited) return;
         edited.ModifiedUtc = DateTime.UtcNow;
         _library.Snippets[_library.Snippets.IndexOf(snippet)] = edited;
         Commit();
     }
+
+    private List<string> SnippetFolders() =>
+        _library.Snippets
+            .Select(s => s.Folder?.Trim())
+            .OfType<string>()
+            .Where(f => f.Length > 0)
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .Order(StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
 
     private async Task RemoveSnippetAsync(Snippet snippet)
     {
@@ -589,7 +601,28 @@ public sealed class HostListView : UserControl
     private void RebuildSnippets()
     {
         _snippetRows.Children.Clear();
-        foreach (Snippet snippet in _library.Snippets.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)) _snippetRows.Children.Add(SnippetRow(snippet));
+        // Snippets without a folder come first, then each folder under its own name.
+        foreach (IGrouping<string, Snippet> folder in _library.Snippets
+            .GroupBy(s => s.Folder?.Trim() ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(g => g.Key.Length > 0)
+            .ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase))
+        {
+            if (folder.Key.Length > 0)
+            {
+                _snippetRows.Children.Add(new TextBlock
+                {
+                    Text = folder.Key,
+                    Foreground = ElioColors.TextMuted,
+                    FontSize = ElioStyle.SmallFontSize,
+                    Margin = new Thickness(8, 6, 8, 2),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Tag = "snippet-folder",
+                });
+            }
+
+            foreach (Snippet snippet in folder.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)) _snippetRows.Children.Add(SnippetRow(snippet));
+        }
+
         if (_snippetRows.Children.Count == 0) _snippetRows.Children.Add(Hint(L.T("Add the commands you use often here.")));
     }
 
@@ -612,7 +645,9 @@ public sealed class HostListView : UserControl
                 },
             },
         };
-        ToolTip.SetTip(row, snippet.Command);
+        // A snippet for some servers only says which, so it is not typed into the wrong one by surprise.
+        List<string> scope = SnippetScope.Names(snippet, _library);
+        ToolTip.SetTip(row, scope.Count == 0 ? snippet.Command : snippet.Command + "\n\n" + L.T("For: {0}", string.Join(", ", scope)));
         Highlight(row);
         row.PointerPressed += (_, e) =>
         {
@@ -718,6 +753,7 @@ public sealed class HostListView : UserControl
         if (ssh) menu.Add(Item(L.T("Open files with another server…"), () => FilesWithAnotherRequested?.Invoke(host)));
         menu.Add(Item(L.T("Open selected side by side"), () => OpenManyRequested?.Invoke(ActedOn(host))));
         if (ssh) menu.Add(Item(L.T("Run a command on selected"), () => RunManyRequested?.Invoke(ActedOn(host), null)));
+        if (ssh) menu.Add(Item(L.T("Docker containers…"), () => DockerRequested?.Invoke(host)));
         menu.Add(Item(L.T("Edit"), () => _ = EditAsync(host)));
         menu.Add(Item(L.T("Delete"), () => _ = RemoveAsync(host)));
         var row = new Border

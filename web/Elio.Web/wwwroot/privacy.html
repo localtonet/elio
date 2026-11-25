@@ -54,7 +54,7 @@
         <div class="prose">
           <h2 id="short">The short version</h2>
           <ul>
-            <li>No telemetry, no analytics, no crash reports, no advertising and no account of its own.</li>
+            <li>No telemetry, no analytics, no crash reports sent anywhere, no advertising and no account of its own. When Elio fails, a report is written to its logs folder on your own computer, and it stays there.</li>
             <li>Your servers, passwords, keys, snippets and settings stay on your device. Passwords and keys are never written to logs.</li>
             <li>Nothing leaves your device except what is listed under <a href="#network">When Elio uses the network</a>. Most of it happens only if you turn a feature on.</li>
           </ul>
@@ -71,7 +71,8 @@
             <li><strong>Sync (only if you turn it on).</strong> Everything is encrypted on your device with a key made from your password before it leaves, so the sync server, <code>sync.elio.sh</code> by default or one of your own, stores ciphertext only. It cannot read it. Like any server it receives the network address of each request, which it uses to limit abuse, and it holds the sync code, or the Localtonet account, that says whose data it is, together with the size and time of what is stored. The server is open source and <a href="./#self-host">can be run by you</a>.</li>
             <li><strong>Shared terminals (only if you share one).</strong> The stream is encrypted from end to end with a key made from the password you give the viewer. The relay, the same sync server unless you chose another in Settings, passes on bytes it cannot read, and sharing ends when you stop it.</li>
             <li><strong>Localtonet (only if you sign in).</strong> Signing in lists your Localtonet devices and lets Elio connect to them. What Localtonet receives and keeps is governed by Localtonet's own terms and privacy policy at <a href="https://localtonet.com" rel="noopener">localtonet.com</a>. The key Elio is given can only list devices and prove your identity to the sync server.</li>
-            <li><strong>Importing from DigitalOcean or AWS (only when you run it).</strong> The token or access key you type goes to that provider only. It is kept only if you tick <strong>Remember in the vault</strong>.</li>
+            <li><strong>Importing from DigitalOcean, AWS, Hetzner Cloud, Linode, Vultr, Tailscale or a Proxmox VE server (only when you run it).</strong> The token or access key you type goes to that provider only. It is kept only if you tick <strong>Remember in the vault</strong>.</li>
+            <li><strong>Importing from Azure or Google Cloud (only when you run it).</strong> Elio runs your own <code>az</code> or <code>gcloud</code> tool, which uses the sign-in you gave it; Elio itself sends nothing and keeps no credentials.</li>
             <li><strong>Links and plugins.</strong> A web address you Ctrl+click opens in your browser. A plugin is a program you installed yourself and runs under its own rules; Elio never gives plugins passwords or keys.</li>
             <li><strong>AI tools (only if you allow them).</strong> A tool started with <code>elio --mcp</code> sees the names and addresses of your servers, never passwords or keys, and can run commands only where you allowed it twice. What runs is written to <code>mcp-commands.log</code> and <code>mcp-activity.jsonl</code> in the data folder on your device.</li>
           </ul>

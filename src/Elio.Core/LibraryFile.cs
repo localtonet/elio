@@ -29,6 +29,9 @@ public static class LibraryFile
             library.Groups.RemoveAll(group => group?.Name is null);
             library.Snippets.RemoveAll(snippet => snippet?.Name is null || snippet.Command is null);
 
+            // What a snippet is for names servers of the file's own library, which are not this one's, so it is let go.
+            foreach (Snippet snippet in library.Snippets) snippet.For = [];
+
             // A file from before there were identities has none, which is no reason to turn it away.
             library.Identities ??= [];
             library.Identities.RemoveAll(identity => identity?.Name is null);
@@ -72,6 +75,7 @@ public static class LibraryFile
         || !string.IsNullOrWhiteSpace(host.RemoteCommand)
         || host.ForwardAgent
         || host.AllowMcpCommands
+        || host.Proxy is { Kind: ProxyKind.Command }
         || host.Forwards.Any(OpensToOthers);
 
     /// <summary>
@@ -102,6 +106,7 @@ public static class LibraryFile
             host.RemoteCommand = null;
             host.ForwardAgent = false;
             host.AllowMcpCommands = false;
+            if (host.Proxy is { Kind: ProxyKind.Command }) host.Proxy = null;
             host.Forwards.RemoveAll(OpensToOthers);
         }
     }

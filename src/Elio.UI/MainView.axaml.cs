@@ -40,10 +40,17 @@ public partial class MainView : UserControl
             _ = Workspace.OpenGridAsync(hosts);
             HostList.ClearSelection();
         };
-        HostList.RunManyRequested += (hosts, command) => _ = RunOnManyAsync(hosts, command);
-        HostList.SnippetRequested += snippet => Workspace.TypeInActive(snippet.Command);
+        HostList.RunManyRequested += (hosts, command) => _ = RunOnManyFilledAsync(hosts, command);
+        HostList.SnippetRequested += snippet => _ = RunSnippetAsync(snippet);
+        HostList.DockerRequested += host => _ = ShowRemoteDockerAsync(host);
+        OpenServerCopy = (original, copy) => Workspace.OpenCopyAsync(original, copy);
         HostList.Localtonet.OpenSync = ShowSyncAsync;
-        AppServices.LinkOpened += OpenLink;
+        AppServices.LaunchRequested += HandleLaunch;
+        Elio.Connections.ProxyCommand.Approve = ApproveProxyCommandAsync;
+        Elio.Connections.PasswordManagers.AskBitwardenPassword = async _ =>
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => Dialogs.AskSecretAsync("Bitwarden", L.T("Bitwarden is locked. Its master password unlocks it for as long as Elio runs; it is given to the bw tool and not kept."), offerRemember: false)) is { } answer
+                ? answer.Secret
+                : null;
 
         // AI tools work in a process of their own; this is how the window gets to say what they did.
         if (!AppServices.MobileLayout)
@@ -59,7 +66,7 @@ public partial class MainView : UserControl
                     Workspace.ShowAiPanel);
             });
         }
-        if (AppServices.TakePendingLink() is { } waiting) OpenLink(waiting);
+        if (AppServices.TakePendingLaunch() is { } waiting) HandleLaunch(waiting);
 
         FontFamily = ElioStyle.Font;
         FontSize = ElioStyle.BaseFontSize;
@@ -172,6 +179,47 @@ public partial class MainView : UserControl
     public Task RunOnManyAsync(IReadOnlyList<HostEntry> preselected, string? command) =>
         Dialogs.RunOnHostsAsync(HostList.Hosts.Where(IsSsh).ToList(), preselected.Where(IsSsh).ToList(), command, Workspace.RunOnHostAsync);
 
+    /// <summary>Types a snippet into the terminal in front, after asking for its blanks if it has any.</summary>
+    public async Task RunSnippetAsync(Snippet snippet)
+    {
+        if (await FillBlanksAsync(snippet.Name, snippet.Command) is string command) Workspace.TypeInActive(command);
+    }
+
+    // A snippet sent to many servers has its blanks filled once, for all of them.
+    private async Task RunOnManyFilledAsync(IReadOnlyList<HostEntry> hosts, string? command)
+    {
+        string? filled = command;
+        if (command is not null && (filled = await FillBlanksAsync(L.T("Run a command on several servers"), command)) is null) return;
+        await RunOnManyAsync(hosts, filled);
+    }
+
+    /// <summary>The command with its blanks filled in, or null if the user backed out. A command without blanks comes back as it is.</summary>
+    private async Task<string?> FillBlanksAsync(string title, string command)
+    {
+        IReadOnlyList<SnippetBlank> blanks = SnippetTemplate.Blanks(command);
+        if (blanks.Count == 0) return command;
+        return await Dialogs.FillBlanksAsync(title, blanks) is { } values ? SnippetTemplate.Fill(command, values) : null;
+    }
+
+    /// <summary>
+    /// Shows a proxy command before it runs for the first time on this device, and remembers a yes for that command,
+    /// word for word. A server entry can come from sync or from a file, and this is a program started on this computer.
+    /// </summary>
+    private async Task<bool> ApproveProxyCommandAsync(string command, CancellationToken cancellation)
+    {
+        Vault vault = AppServices.Vault;
+        string name = Elio.Connections.ProxyCommand.ApprovalName(command);
+        if (vault.IsAvailable && vault.GetLocal(name) is not null) return true;
+
+        bool yes = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => Dialogs.ConfirmAsync(
+            L.T("Run a command to connect?"),
+            L.T("This server connects through a command that runs on this computer, with your rights:\n\n{0}\n\nRun it? Elio remembers the answer for this command.", command),
+            L.T("Run it")));
+        cancellation.ThrowIfCancellationRequested();
+        if (yes && vault.IsAvailable) vault.SetLocal(name, DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        return yes;
+    }
+
     // Running a command without a shell is something only SSH offers.
     private static bool IsSsh(HostEntry host) => host.Kind == HostKind.Ssh;
 
@@ -230,19 +278,6 @@ public partial class MainView : UserControl
 
     public Task ShowSyncAsync() => Dialogs.ShowSyncAsync(AppServices.Sync, () => HostList.Localtonet.SignInAsync(offerSync: false));
 
-    /// <summary>
-    /// Takes a link the system handed over: the QR code a device that already syncs shows, read by the phone's own
-    /// camera. It opens the step that adds this device, with the code filled in and nothing done yet.
-    /// </summary>
-    private void OpenLink(string link) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-    {
-        if (!Elio.Sync.SyncLink.TryParse(link, out _, out _)) return;
-
-        _ = AppServices.Sync.IsOn
-            ? Dialogs.ShowMessageAsync(L.T("Sync"), L.T("Sync is already on on this device. Turn it off here first to join another one."))
-            : Dialogs.ShowSyncAsync(AppServices.Sync, () => HostList.Localtonet.SignInAsync(offerSync: false), link);
-    });
-
     private async Task ShowHostPickerAsync()
     {
         if (await Dialogs.ChooseAsync(HostItems().ToList(), L.T("Server to connect to")) is PaletteItem item) item.Run();
@@ -270,6 +305,30 @@ public partial class MainView : UserControl
 
         var items = containers.Select(c => new PaletteItem(c.Name, string.Join("  \u00b7  ", c.Tags), () => _ = Workspace.OpenAsync(c))).ToList();
         if (await Dialogs.ChooseAsync(items, L.T("Container to open a shell in")) is PaletteItem chosen) chosen.Run();
+    }
+
+    /// <summary>Lists the pods running in the cluster kubectl points at, and opens a shell in the chosen one.</summary>
+    public async Task ShowKubernetesAsync()
+    {
+        List<HostEntry> pods;
+        try
+        {
+            pods = await Elio.Connections.KubernetesPods.ListAsync(CancellationToken.None);
+        }
+        catch (IOException ex)
+        {
+            await Dialogs.ShowMessageAsync("Kubernetes", ex.Message);
+            return;
+        }
+
+        if (pods.Count == 0)
+        {
+            await Dialogs.ShowMessageAsync("Kubernetes", L.T("No pods are running."));
+            return;
+        }
+
+        var items = pods.Select(p => new PaletteItem(p.Name, string.Join("  \u00b7  ", p.Tags), () => _ = Workspace.OpenAsync(p))).ToList();
+        if (await Dialogs.ChooseAsync(items, L.T("Pod to open a shell in")) is PaletteItem chosen) chosen.Run();
     }
 
     /// <summary>The commands that can have a shortcut, under the names the user knows them by.</summary>
@@ -320,6 +379,7 @@ public partial class MainView : UserControl
             new(L.T("Run a command on several servers"), L.T("Servers"), () => _ = RunOnManyAsync(HostList.SelectedHosts, null)),
             new(L.T("Import servers…"), ImportSources, () => _ = ShowImportAsync()),
             new(L.T("Export servers to a file"), L.T("Servers"), () => _ = ExportServersAsync()),
+            new(L.T("Export servers as an OpenSSH config file"), "~/.ssh/config", () => _ = ExportSshConfigAsync()),
             new(L.T("Save this layout as a workspace…"), L.T("Workspaces"), () => _ = SaveWorkspaceAsync()),
             new(L.T("Open workspace…"), L.T("Workspaces"), () => _ = ChooseWorkspaceToOpenAsync()),
             new(L.T("Rename workspace…"), L.T("Workspaces"), () => _ = RenameWorkspaceAsync()),
@@ -328,7 +388,10 @@ public partial class MainView : UserControl
             new(L.T("Open files with another server…"), L.T("Pane"), () => _ = OpenFilesWithAnotherAsync(Workspace.ActiveHost)),
             new(L.T("Turn broadcast input on / off"), L.T("Pane"), Workspace.ToggleBroadcast),
             new(L.T("Save output / stop"), L.T("Pane"), Workspace.ToggleOutputLog),
+            new(L.T("Record this terminal (asciinema) / stop"), L.T("Pane"), Workspace.ToggleRecording),
             new(L.T("Find in output"), L.T("Pane"), Workspace.FindInActive),
+            new(L.T("Compare folders"), L.T("Pane"), Workspace.CompareFilesInActive),
+            new(L.T("Synchronise folders…"), L.T("Pane"), Workspace.SynchroniseFilesInActive),
             new(L.T("Zoom pane in / out"), L.T("Pane"), Workspace.ToggleZoom),
             new(L.T("Clear screen and history"), L.T("Pane"), Workspace.ClearActive),
             new(L.T("Reopen closed tab"), L.T("Pane"), Workspace.ReopenClosedTab),
@@ -344,6 +407,8 @@ public partial class MainView : UserControl
             new(L.T("Get access keys for all devices…"), "Localtonet", () => _ = HostList.Localtonet.ImportKeysAsync()),
             new(L.T("Add another Localtonet account"), "Localtonet", () => _ = HostList.Localtonet.SignInAsync()),
             new(L.T("Docker containers"), L.T("Servers"), () => _ = ShowDockerAsync()),
+            new(L.T("Kubernetes pods"), L.T("Servers"), () => _ = ShowKubernetesAsync()),
+            new(L.T("Docker containers on a server…"), L.T("Servers"), () => _ = ShowRemoteDockerAsync(null)),
             new(L.T("Keyboard shortcuts"), L.T("App"), () => _ = ShowShortcutsAsync()),
             new(L.T("Settings"), L.T("App"), () => _ = ShowSettingsAsync()),
             new(L.T("Group tabs by repository"), L.T("Pane"), Workspace.GroupTabs),
@@ -359,7 +424,11 @@ public partial class MainView : UserControl
         items.Add(new(L.T("Command history"), L.T("Pane"), () => _ = Workspace.ShowHistoryAsync()));
         if (!AppServices.MobileLayout) items.Add(new(L.T("Check for updates"), L.T("App"), () => _ = UpdateCheck.CheckNowAsync(Workspace)));
         items.AddRange(PluginItems());
-        items.AddRange(HostList.Snippets.Select(s => new PaletteItem(s.Name, L.T("Command"), () => Workspace.TypeInActive(s.Command))));
+        // Only the snippets for the server in front, and those for every terminal.
+        HostEntry? inFront = Workspace.ActiveHost;
+        items.AddRange(HostList.Snippets
+            .Where(s => SnippetScope.AppliesTo(s, inFront, AppServices.Library))
+            .Select(s => new PaletteItem(s.Name, s.Folder is { Length: > 0 } folder ? folder : L.T("Command"), () => _ = RunSnippetAsync(s))));
         items.AddRange(HostItems());
 
         if (await Dialogs.ChooseAsync(items, L.T("Search for a command or server")) is PaletteItem chosen) chosen.Run();
