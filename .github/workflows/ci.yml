@@ -1,8 +1,8 @@
 # Builds what a pull request can break: the desktop app, the sync server and the website, on Linux, Windows and macOS.
 # The terminal engine comes from native/out in the repository; a release rebuilds it from source.
 #
-# The tests run on all three. They never load the terminal engine (they pass with it taken out of their folder), which
-# matters on macOS: native/out in the repository has only the Linux and Windows libraries.
+# The tests run on all three. native/out in the repository has only the Linux and Windows engine, so on macOS the tests
+# that drive the real terminal engine ([EngineFact], [EngineTheory]) are skipped and say why; the rest run everywhere.
 name: CI
 
 on:

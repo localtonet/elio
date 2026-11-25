@@ -32,7 +32,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         return await HeardAsync();
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Escape_IsCsiU_OnlyWhileTheProgramAsks()
     {
         Assert.Equal("\u001b", await KeyAsync(TerminalKey.Escape));
@@ -46,7 +46,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         Assert.Equal("\u001b", await KeyAsync(TerminalKey.Escape));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task CtrlI_AndTab_AreTold_Apart()
     {
         Assert.Equal("\t", await KeyAsync(TerminalKey.Tab));
@@ -64,7 +64,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         Assert.Equal("\r", await KeyAsync(TerminalKey.Enter));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task ReleaseAndRepeat_AreReported_OnlyWithFlag2()
     {
         // Without the flag a release produces nothing, and a repeat is one more press.
@@ -85,7 +85,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         Assert.False(_terminal.SendKey(TerminalKey.Escape, TerminalMods.None, 0, null, TerminalKeyAction.Release));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task EveryKey_IncludingPlainCharacters_IsAnEscapeCode_WithFlag8()
     {
         Assert.Equal("a", await KeyAsync(TerminalKey.A, unshifted: 'a', text: "a"));
@@ -99,7 +99,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         Assert.Equal("\u001b[97;;97u", await KeyAsync(TerminalKey.A, unshifted: 'a', text: "a"));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Query_IsAnsweredWithTheFlagsInForce()
     {
         Print("\u001b[?u");
@@ -115,7 +115,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         Assert.Equal("\u001b[?0u", await HeardAsync());
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Flags_CanBeSetAndChangedInPlace()
     {
         // CSI = flags ; mode u: 1 sets them, 2 adds to them, 3 takes them away.
@@ -127,7 +127,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         Assert.Equal("\u001b[27;1:3u", await KeyAsync(TerminalKey.Escape, action: TerminalKeyAction.Release));
     }
 
-    [Fact]
+    [EngineFact]
     public void FullScreenProgram_HasFlagsOfItsOwn()
     {
         // The main and alternate screens each keep their own stack, so a program that forgets to pop leaves the shell alone.
@@ -138,7 +138,7 @@ public sealed class KittyKeyboardTests : IAsyncLifetime
         Assert.Equal(KittyKeyboardFlags.None, _terminal.KeyboardFlags);
     }
 
-    [Fact]
+    [EngineFact]
     public void Reset_ForgetsTheFlags()
     {
         Print("\u001b[>1u\u001bc");

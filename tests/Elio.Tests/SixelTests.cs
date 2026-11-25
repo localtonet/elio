@@ -182,7 +182,7 @@ public sealed class SixelTests
         return image.Append("\u001b\\").ToString();
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Image_IsDrawnAtTheCursor_AtItsOwnSize()
     {
         await using TerminalSession terminal = Terminal();
@@ -198,7 +198,7 @@ public sealed class SixelTests
         Assert.All(pixels.Rgba.Chunk(4), pixel => Assert.Equal(new byte[] { 255, 0, 0, 255 }, pixel));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Cursor_EndsBelowTheImage_InTheColumnItStartedIn()
     {
         await using TerminalSession terminal = Terminal();
@@ -210,7 +210,7 @@ public sealed class SixelTests
         Assert.Equal("", Row(terminal, 4));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Image_AtTheBottom_ScrollsTheScreenUp_WithItself()
     {
         await using TerminalSession terminal = Terminal();
@@ -221,7 +221,7 @@ public sealed class SixelTests
         Assert.Equal("", Row(terminal, 0));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task UnpaintedPixels_AreTheBackground_UnlessTheImageAsksForThemClear()
     {
         await using TerminalSession terminal = Terminal();
@@ -238,7 +238,7 @@ public sealed class SixelTests
         Assert.Equal(new byte[][] { [255, 0, 0, 255], [0, 0, 0, 0] }, clear);
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Image_CutAtAnyByte_IsTheSameImage()
     {
         string text = "ab" + Image + "cd";
@@ -254,7 +254,7 @@ public sealed class SixelTests
         }
     }
 
-    [Theory]
+    [EngineTheory]
     [InlineData(1581, 1581, true)]
     [InlineData(4096, 610, true)]
     [InlineData(1582, 1582, false)]
@@ -272,7 +272,7 @@ public sealed class SixelTests
         Assert.Equal("after", Row(terminal, 0)[..5]);
     }
 
-    [Fact]
+    [EngineFact]
     public async Task DeviceAttributes_SaySixelWorks()
     {
         var transport = new ScriptedTransport();
@@ -286,7 +286,7 @@ public sealed class SixelTests
         Assert.Equal("\u001b[>1;0;0c", Encoding.ASCII.GetString(await transport.HeardAsync()));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task SizesInPixels_AreAnswered_OnceTheCellSizeIsKnown()
     {
         var transport = new ScriptedTransport();
@@ -304,7 +304,7 @@ public sealed class SixelTests
         Assert.Equal("\u001b[8;30;100t", Encoding.ASCII.GetString(await transport.HeardAsync()));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task OtherDcs_StillReachesTheEngine()
     {
         var transport = new ScriptedTransport();
@@ -321,7 +321,7 @@ public sealed class SixelTests
         Assert.Empty(ImagesOn(terminal));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Image_ThatNeverEnds_KeepsTheTerminalWorking()
     {
         await using TerminalSession terminal = Terminal();
@@ -338,7 +338,7 @@ public sealed class SixelTests
         Assert.Empty(ImagesOn(terminal));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Garbage_ThroughTheTerminal_NeverHurtsIt()
     {
         var random = new Random(2026);

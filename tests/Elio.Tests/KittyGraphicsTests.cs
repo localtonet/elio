@@ -34,7 +34,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
 
     private string Row(int row) => string.Concat(_terminal.RowCells(row) ?? []).TrimEnd();
 
-    [Fact]
+    [EngineFact]
     public void Rgba_IsStoredAsSent()
     {
         byte[] pixels = Pixels(6, 4);
@@ -46,7 +46,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Equal(pixels, image.Rgba);
     }
 
-    [Fact]
+    [EngineFact]
     public void Rgb_GetsAnOpaqueAlpha()
     {
         Print(Command("a=t,f=24,s=2,v=1,i=2,q=2", [1, 2, 3, 4, 5, 6]));
@@ -54,7 +54,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Equal([1, 2, 3, 255, 4, 5, 6, 255], _terminal.ReadImagePixels(2)!.Rgba);
     }
 
-    [Fact]
+    [EngineFact]
     public void Picture_SentInChunks_IsPutTogether()
     {
         byte[] pixels = Pixels(64 * 64, 4);
@@ -72,7 +72,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Equal(pixels, _terminal.ReadImagePixels(3)!.Rgba);
     }
 
-    [Fact]
+    [EngineFact]
     public void Picture_PlacedOnScreen_IsListedWithItsSizeAndPlace()
     {
         Print("\r\n\r\n  ");
@@ -88,7 +88,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Equal((4, 4), (image.SourceWidth, image.SourceHeight));
     }
 
-    [Fact]
+    [EngineFact]
     public async Task Resize_ToTheSameGrid_StillTellsTheEngineTheCellSize()
     {
         await using var fresh = new TerminalSession(new ScriptedTransport(), 80, 24);
@@ -102,7 +102,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Equal((20, 20), (Assert.Single(images).Width, images[0].Height));
     }
 
-    [Fact]
+    [EngineFact]
     public void Picture_ThatIsDeleted_IsGone()
     {
         Print(Command("a=T,f=32,s=1,v=1,i=5,q=2", [1, 2, 3, 4]));
@@ -114,7 +114,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Empty(images);
     }
 
-    [Theory]
+    [EngineTheory]
     [InlineData("a=t,f=32,s=100000,v=100000,i=6,q=2")]
     [InlineData("a=t,f=32,s=4294967295,v=4294967295,i=6,q=2")]
     [InlineData("a=t,f=32,s=3,v=3,i=6,q=2")]
@@ -130,7 +130,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Contains("still here", Row(0), StringComparison.Ordinal);
     }
 
-    [Fact]
+    [EngineFact]
     public void Png_IsHandedToTheDecoderAndAWellFormedResultKept()
     {
         TerminalImages.DecodePng = _ => new ImagePixels(1, 2, [9, 8, 7, 6, 5, 4, 3, 2]);
@@ -144,7 +144,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
 
     public static TheoryData<string> BadDecodes => ["throws", "null", "huge", "short", "negative"];
 
-    [Theory]
+    [EngineTheory]
     [MemberData(nameof(BadDecodes))]
     public void Png_ThatTheDecoderCannotOrMustNotGiveBack_IsRefusedWithoutHarm(string outcome)
     {
@@ -164,7 +164,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.Contains("after", Row(0), StringComparison.Ordinal);
     }
 
-    [Fact]
+    [EngineFact]
     public void Commands_OfGarbage_NeverHurtTheTerminal()
     {
         var random = new Random(1977);
@@ -190,7 +190,7 @@ public sealed class KittyGraphicsTests : IAsyncLifetime
         Assert.StartsWith("done", Row(0), StringComparison.Ordinal);
     }
 
-    [Theory]
+    [EngineTheory]
     [InlineData("f")]
     [InlineData("t")]
     public void Picture_FromAFileOnThisComputer_IsNotReadOnAProgramsSayso(string medium)
