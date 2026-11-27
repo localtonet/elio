@@ -170,7 +170,18 @@ public sealed class SyncCoordinator
     /// <summary>Reads and writes the app's own state for the engine.</summary>
     private sealed class AppLocal(SyncCoordinator owner) : ISyncLocal
     {
+        // What the last capture held, to see at applying whether anything changed here in the meantime.
+        private byte[]? _captured;
+
         public SyncDocument Capture() => Dispatcher.UIThread.Invoke(() =>
+        {
+            SyncDocument document = Snapshot();
+            _captured = document.ToBytes();
+            return document;
+        });
+
+        // Called on the UI thread, where the library changes.
+        private static SyncDocument Snapshot()
         {
             HostLibrary library = AppServices.Library;
             var document = new SyncDocument
@@ -191,12 +202,22 @@ public sealed class SyncCoordinator
                 document.SecretsDeleted = AppServices.Vault.Deleted.ToDictionary(p => p.Key, p => p.Value);
             }
 
-            // Taken on the UI thread, where the library changes, and copied before anything else can touch it.
+            // Copied before anything else can touch it.
             return document.Clone();
-        });
+        }
 
         public void Apply(SyncDocument merged) => Dispatcher.UIThread.Invoke(() =>
         {
+            // The library may have changed here while the server was asked, a server added or edited. What was merged
+            // from the copy taken before would replace that change and lose it, so it is merged in once more, the same
+            // way, and the next round takes it to the server.
+            SyncDocument now = Snapshot();
+            if (_captured is null || !now.ToBytes().AsSpan().SequenceEqual(_captured))
+            {
+                merged = SyncMerge.Merge(now, merged, DateTime.UtcNow);
+                owner._again = true;
+            }
+
             owner._applying = true;
             try
             {

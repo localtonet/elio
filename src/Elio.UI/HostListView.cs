@@ -381,14 +381,16 @@ public sealed class HostListView : UserControl
     {
         if (await _dialogs.EditHostAsync(host, GroupChoices(), _library.Hosts) is not HostEntry edited) return;
         edited.ModifiedUtc = DateTime.UtcNow;
-        _library.Hosts[_library.Hosts.IndexOf(host)] = edited;
+        LibraryEdits.Replace(_library, edited);
         Commit();
     }
 
     private async Task RemoveAsync(HostEntry host)
     {
         if (!await _dialogs.ConfirmAsync(L.T("Delete server"), L.T("\"{0}\" and its saved password will be deleted.", host.Name), L.T("Delete"), danger: true)) return;
-        _library.Hosts.Remove(host);
+
+        // By id: a sync that ran while the question was up has put other objects in the list.
+        _library.Hosts.RemoveAll(h => h.Id == host.Id);
         _library.Deleted[host.Id] = DateTime.UtcNow;
         _selected.Remove(host.Id);
         AppServices.Vault.Remove(host.Id);
@@ -444,7 +446,7 @@ public sealed class HostListView : UserControl
     {
         if (await _dialogs.EditSnippetAsync(snippet, SnippetFolders()) is not Snippet edited) return;
         edited.ModifiedUtc = DateTime.UtcNow;
-        _library.Snippets[_library.Snippets.IndexOf(snippet)] = edited;
+        LibraryEdits.Replace(_library, edited);
         Commit();
     }
 
@@ -460,7 +462,7 @@ public sealed class HostListView : UserControl
     private async Task RemoveSnippetAsync(Snippet snippet)
     {
         if (!await _dialogs.ConfirmAsync(L.T("Delete snippet"), L.T("\"{0}\" will be deleted.", snippet.Name), L.T("Delete"), danger: true)) return;
-        _library.Snippets.Remove(snippet);
+        _library.Snippets.RemoveAll(s => s.Id == snippet.Id);
         _library.Deleted[snippet.Id] = DateTime.UtcNow;
         Commit();
     }
@@ -524,7 +526,7 @@ public sealed class HostListView : UserControl
             child.ModifiedUtc = now;
         }
 
-        _library.Groups.Remove(group);
+        _library.Groups.RemoveAll(g => g.Id == group.Id);
         _library.Deleted[group.Id] = now;
 
         // A group has a secret only if its proxy has a password. Deleting a group never asked for the vault to

@@ -51,7 +51,7 @@ public sealed class Vault
         {
             try
             {
-                return _hello is not null && File.Exists(_keyPath) && _hello.IsProtected(File.ReadAllBytes(_keyPath));
+                return _hello is not null && File.Exists(_keyPath) && _hello.IsProtected(AtomicFile.Read(_keyPath));
             }
             catch (IOException)
             {
@@ -259,7 +259,7 @@ public sealed class Vault
         locked = false;
         if (File.Exists(_keyPath))
         {
-            byte[] stored = File.ReadAllBytes(_keyPath);
+            byte[] stored = AtomicFile.Read(_keyPath);
             bool hello = false;
             byte[]? existing = _hello is not null ? _hello.Open(stored, prompt, out hello) : protector.Unprotect(stored);
             if (existing is { Length: KeySize })
@@ -301,7 +301,7 @@ public sealed class Vault
     {
         if (!File.Exists(_dataPath)) return new VaultContents();
 
-        byte[] file = File.ReadAllBytes(_dataPath);
+        byte[] file = AtomicFile.Read(_dataPath);
         if (file.Length < NonceSize + TagSize) return new VaultContents();
 
         byte[] plain = new byte[file.Length - NonceSize - TagSize];

@@ -38,6 +38,19 @@ internal static class AtomicFile
             File.Move(temporary, path);
         }
     }
+
+    /// <summary>
+    /// Reads the whole file without standing in the way of <see cref="Write"/>. Another Elio process, such as the one an
+    /// AI tool starts with --mcp, reads these files while the window may be saving them, and on Windows a reader that
+    /// does not share deletion makes the window's save fail, and what it was saving is lost.
+    /// </summary>
+    public static byte[] Read(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
 }
 
 /// <summary>
@@ -123,7 +136,7 @@ public sealed class JsonFileStore<T>(string path, JsonTypeInfo<T> typeInfo) wher
 
         try
         {
-            value = JsonSerializer.Deserialize(File.ReadAllBytes(file), typeInfo);
+            value = JsonSerializer.Deserialize(AtomicFile.Read(file), typeInfo);
         }
         catch (JsonException)
         {

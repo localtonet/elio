@@ -31,8 +31,10 @@ public sealed class SyncDocument
     public Dictionary<Guid, DateTime>? WorkspacesDeleted { get; set; }
 
     /// <summary>A copy that shares nothing with the original, so the live library can't change under a sync.</summary>
-    public SyncDocument Clone() =>
-        JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(this, SyncJson.Default.SyncDocument), SyncJson.Default.SyncDocument)!;
+    public SyncDocument Clone() => JsonSerializer.Deserialize(ToBytes(), SyncJson.Default.SyncDocument)!;
+
+    /// <summary>The document as JSON. Two that hold the same, in the same order, give the same bytes.</summary>
+    public byte[] ToBytes() => JsonSerializer.SerializeToUtf8Bytes(this, SyncJson.Default.SyncDocument);
 }
 
 [JsonSourceGenerationOptions(WriteIndented = false)]
