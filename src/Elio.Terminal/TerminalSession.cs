@@ -1038,7 +1038,8 @@ public sealed partial class TerminalSession : IAsyncDisposable
                 cursor.ViewportX,
                 cursor.ViewportY,
                 (CursorShape)cursor.VisualStyle,
-                cursor.Blinking != 0);
+                cursor.Blinking != 0,
+                cursor.ViewportHasValue != 0);
         }
     }
 

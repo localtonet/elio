@@ -77,6 +77,10 @@ public sealed class TerminalView : Control
     // Written on the render thread, read on the UI thread.
     private volatile bool _cursorBlinks;
 
+    // Where the cursor was at the last draw. Only the render thread uses them.
+    private int _drawnCursorX = -1;
+    private int _drawnCursorY = -1;
+
     public TerminalSession? Session => _session;
 
     public TerminalAppearance Appearance
@@ -231,10 +235,11 @@ public sealed class TerminalView : Control
         return new InputHighlight(column, row, SpansOf, ColorFor, _syntaxVersion);
     }
 
-    // For a shell that does not mark its prompts: the first character of a line says where the line begins.
+    // For a shell that does not mark its prompts: the first character of a line says where the line begins. That is kept
+    // whether or not the line is colored, since it is also what keeps the cursor in sight while the line is edited.
     private void MarkLineStart(string text)
     {
-        if (!_syntaxColors || _session is not TerminalSession session || session.PromptMarksSeen || session.AlternateScreen) return;
+        if (_session is not TerminalSession session || session.PromptMarksSeen || session.AlternateScreen) return;
         if (text.Length == 0 || text.Any(char.IsControl) || _typed is not { Known: true, Text.Length: 0 }) return;
 
         session.MarkInputStart();
@@ -681,7 +686,7 @@ public sealed class TerminalView : Control
     }
 
     public override void Render(DrawingContext context) =>
-        context.Custom(new DrawOperation(this, new Rect(Bounds.Size), IsFocused, _cursorOn, IsFocused ? SuggestedRest() : NoSuggestion(), CurrentInput()));
+        context.Custom(new DrawOperation(this, new Rect(Bounds.Size), IsFocused, _cursorOn, IsFocused ? SuggestedRest() : NoSuggestion(), CurrentInput(), _session?.TypingAtPrompt == true));
 
     /// <summary>
     /// Tells the on-screen keyboard that this is somewhere to type. A terminal has no text of its own to
@@ -721,7 +726,7 @@ public sealed class TerminalView : Control
         }, wait));
     }
 
-    private sealed class DrawOperation(TerminalView owner, Rect bounds, bool focused, bool cursorOn, string? ghost, InputHighlight? input) : ICustomDrawOperation
+    private sealed class DrawOperation(TerminalView owner, Rect bounds, bool focused, bool cursorOn, string? ghost, InputHighlight? input, bool typingAtPrompt) : ICustomDrawOperation
     {
         public Rect Bounds => bounds;
 
@@ -739,9 +744,19 @@ public sealed class TerminalView : Control
             if (context.TryGetFeature<ISkiaSharpApiLeaseFeature>() is not ISkiaSharpApiLeaseFeature feature) return;
 
             using ISkiaSharpApiLease lease = feature.Lease();
-            if (renderer.Draw(lease.SkCanvas, session, (float)bounds.Width, (float)bounds.Height, focused, cursorOn, ghost, input) is not TerminalFrame frame) return;
+            if (renderer.Draw(lease.SkCanvas, session, (float)bounds.Width, (float)bounds.Height, focused, cursorOn, ghost, input, typingAtPrompt) is not TerminalFrame frame) return;
 
             owner._cursorBlinks = frame.CursorBlinking;
+
+            // A cursor that has just moved starts its blink over, lit, so the eye can follow it. The server moves it
+            // some time after the key that asked for it, by however long the way there and back takes.
+            if (frame.CursorX != owner._drawnCursorX || frame.CursorY != owner._drawnCursorY)
+            {
+                owner._drawnCursorX = frame.CursorX;
+                owner._drawnCursorY = frame.CursorY;
+                if (frame.CursorBlinking) Dispatcher.UIThread.Post(owner.RestartBlink);
+            }
+
             if (renderer.NextAnimation is TimeSpan wait) owner.ScheduleAnimationFrame(wait);
             DrawScrollbar(lease.SkCanvas, session.ScrollPosition, frame.Foreground);
         }
@@ -1066,6 +1081,26 @@ public sealed class TerminalView : Control
         InvalidateVisual();
     }
 
+    /// <summary>
+    /// Shows the cursor and starts its blinking over, as other terminals do when a key is pressed or the cursor moves.
+    /// A cursor that kept to its own beat would be off about half the times the user looks for it while moving
+    /// through a line with the arrow keys.
+    /// </summary>
+    private void RestartBlink()
+    {
+        bool wasOff = !_cursorOn;
+        _cursorOn = true;
+
+        // Without the focus the cursor does not blink, and the timer stays stopped until the focus comes back.
+        if (IsFocused)
+        {
+            _blinkTimer.Stop();
+            _blinkTimer.Start();
+        }
+
+        if (wasOff) InvalidateVisual();
+    }
+
     /// <summary>Copies the selection. Returns false when nothing is selected.</summary>
     public async Task<bool> CopyAsync()
     {
@@ -1106,6 +1141,7 @@ public sealed class TerminalView : Control
 
         bool reachesOthers = InputTargets?.Invoke().Skip(1).Any() == true;
         if ((reachesOthers || !TerminalSession.IsPasteSafe(text)) && ConfirmPaste is not null && !await ConfirmPaste(text)) return;
+        RestartBlink();
         TrackPaste(text);
         ForEachTarget(session => session.Paste(text));
     }
@@ -1113,6 +1149,7 @@ public sealed class TerminalView : Control
     /// <summary>Sends text as if it had been typed, to every terminal typing currently reaches.</summary>
     public void Type(string text)
     {
+        RestartBlink();
         TrackText(text);
         ForEachTarget(session => session.SendText(text));
     }
@@ -1140,6 +1177,7 @@ public sealed class TerminalView : Control
     {
         base.OnKeyDown(e);
         if (_session is null) return;
+        RestartBlink();
 
         if (IsCopy(e))
         {
@@ -1214,6 +1252,7 @@ public sealed class TerminalView : Control
     {
         base.OnTextInput(e);
         if (_session is null || string.IsNullOrEmpty(e.Text)) return;
+        RestartBlink();
         if (_stickyMods != TerminalMods.None) TypeWithSticky(e.Text);
         else
         {

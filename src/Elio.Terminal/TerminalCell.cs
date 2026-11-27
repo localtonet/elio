@@ -58,7 +58,10 @@ public readonly record struct TerminalFrame(
     int CursorX,
     int CursorY,
     CursorShape CursorShape,
-    bool CursorBlinking);
+    bool CursorBlinking,
+
+    // Whether the cursor is on the rows shown, hidden by the program or not. Scrolled back through the history, it is not.
+    bool CursorInView);
 
 /// <summary>Receives a row that has to be drawn again. The cells are only valid during the call.</summary>
 public delegate void RowVisitor(int row, ReadOnlySpan<TerminalCell> cells);

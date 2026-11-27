@@ -86,7 +86,8 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
     /// <returns>The frame that was drawn, or null if the session has closed.</returns>
     /// <param name="ghost">A suggestion for the rest of the line being typed, drawn from the cursor on. Null for none.</param>
     /// <param name="input">The command line being typed, to be colored by what its parts are. Null for none.</param>
-    public TerminalFrame? Draw(SKCanvas canvas, TerminalSession session, float width, float height, bool focused, bool cursorOn, string? ghost, InputHighlight? input = null)
+    /// <param name="typingAtPrompt">Whether a command line is being typed at the shell's prompt (<see cref="TerminalSession.TypingAtPrompt"/>).</param>
+    public TerminalFrame? Draw(SKCanvas canvas, TerminalSession session, float width, float height, bool focused, bool cursorOn, string? ghost, InputHighlight? input = null, bool typingAtPrompt = false)
     {
         long now = Environment.TickCount64;
         NextAnimation = session.AdvanceAnimations(now) is long due ? TimeSpan.FromMilliseconds(Math.Clamp(due - now, MinAnimationDelay, MaxAnimationDelay)) : null;
@@ -94,7 +95,9 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
         TerminalFrame? read = session.ReadFrame(BuildRow, _everRead ? FrameRead.Changes : FrameRead.All);
         if (read is not TerminalFrame frame) return null;
         _everRead = true;
-        PaintInput(frame, input);
+
+        bool shown = ShowsCursor(frame, typingAtPrompt);
+        PaintInput(frame, input, shown);
 
         canvas.Save();
         canvas.ClipRect(new SKRect(0, 0, width, height));
@@ -115,10 +118,10 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
         DrawImages(canvas, session, overText: true);
         ForgetUnusedImages();
 
-        using SKTextBlob? suggestion = frame.CursorVisible && frame.CursorY < rows && ghost is { Length: > 0 } ? BuildGhost(frame, ghost) : null;
+        using SKTextBlob? suggestion = shown && frame.CursorY < rows && ghost is { Length: > 0 } ? BuildGhost(frame, ghost) : null;
         if (suggestion is not null) DrawGhost(canvas, frame, suggestion, underCursor: false);
 
-        if (frame.CursorVisible && frame.CursorY < rows && (cursorOn || !frame.CursorBlinking || !focused))
+        if (shown && frame.CursorY < rows && (cursorOn || !frame.CursorBlinking || !focused))
         {
             DrawCursor(canvas, frame, focused);
 
@@ -129,6 +132,15 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
         canvas.Restore();
         return frame;
     }
+
+    /// <summary>
+    /// Whether the cursor is drawn: when the program shows it, and also while a command line is being typed at the shell's
+    /// prompt, if a program hid it and stopped or crashed before showing it again. The shell does not show it again by
+    /// itself, and a line cannot be edited without seeing where the cursor is. Full-screen programs, progress bars and
+    /// pickers that hide it on purpose are not at a prompt, so they keep it hidden.
+    /// </summary>
+    internal static bool ShowsCursor(TerminalFrame frame, bool typingAtPrompt) =>
+        frame.CursorInView && (frame.CursorVisible || typingAtPrompt);
 
     /// <summary>Draws the pictures that go under the text, or the ones that go over it.</summary>
     private void DrawImages(SKCanvas canvas, TerminalSession session, bool overText)
@@ -296,7 +308,9 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
         float x = frame.CursorX * fonts.CellWidth;
         float y = frame.CursorY * fonts.CellHeight;
         CursorShape shape = focused ? frame.CursorShape : CursorShape.HollowBlock;
-        _paint.Color = Opaque(frame.CursorColor);
+        TerminalCell under = frame.CursorY < _cells.Count && frame.CursorX < _cells[frame.CursorY].Length ? _cells[frame.CursorY][frame.CursorX] : default;
+        (uint cursor, uint text) = CursorColors(frame.CursorColor, frame.Foreground, frame.Background, under);
+        _paint.Color = Opaque(cursor);
 
         switch (shape)
         {
@@ -315,14 +329,43 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
                 var cell = new SKRect(x, y, x + fonts.CellWidth, y + fonts.CellHeight);
                 canvas.DrawRect(cell, _paint);
 
-                // The character under the block is redrawn in the background color so it stays readable.
+                // The character under the block is redrawn in a color that stands out from it, so it stays readable.
                 canvas.Save();
                 canvas.ClipRect(cell);
-                _paint.Color = Opaque(frame.Background);
+                _paint.Color = Opaque(text);
                 foreach (var (blob, _) in _rows[frame.CursorY].Text) canvas.DrawText(blob, 0, y, _paint);
                 canvas.Restore();
                 break;
         }
+    }
+
+    // How far apart two colors have to be, as a distance between their red, green and blue, to tell one from the other in a cell.
+    private const int DistinctColors = 48;
+
+    /// <summary>
+    /// The colors to draw the cursor in over a cell: the cursor's, and the screen's background for the character under a
+    /// block. Over a cell whose own background is too like the cursor's color the cursor would vanish into it. That is
+    /// the case in text a shell shows in reverse, as bash and zsh do with what was just pasted, wherever the theme's
+    /// cursor has the text's color. There the cell is drawn the other way round, in its text color with its character in
+    /// its background, as other terminals do.
+    /// </summary>
+    internal static (uint Cursor, uint Text) CursorColors(uint cursor, uint foreground, uint background, TerminalCell cell)
+    {
+        // Only a cell with a background of its own differs from the screen. The others may not even have colors, past the end of a line.
+        bool own = (cell.Flags & CellFlags.HasBackground) != 0;
+        uint under = own ? cell.Background : background;
+        if (!Alike(cursor, under)) return (cursor, background);
+
+        uint block = own && !Alike(cell.Foreground, under) ? cell.Foreground : Alike(foreground, under) ? background : foreground;
+        return (block, Alike(background, block) ? under : background);
+    }
+
+    private static bool Alike(uint a, uint b)
+    {
+        int red = (int)((a >> 16) & 0xFF) - (int)((b >> 16) & 0xFF);
+        int green = (int)((a >> 8) & 0xFF) - (int)((b >> 8) & 0xFF);
+        int blue = (int)(a & 0xFF) - (int)(b & 0xFF);
+        return (red * red) + (green * green) + (blue * blue) < DistinctColors * DistinctColors;
     }
 
     private void BuildRow(int y, ReadOnlySpan<TerminalCell> cells)
@@ -353,9 +396,9 @@ internal sealed class TerminalRenderer(TerminalFonts fonts, bool ligatures, IRea
     /// their cells with the colors changed, and only when the line, or how to color it, is not what was painted last
     /// time. Text a program has colored itself, as the shell does with a suggestion, is left alone.
     /// </summary>
-    private void PaintInput(TerminalFrame frame, InputHighlight? input)
+    private void PaintInput(TerminalFrame frame, InputHighlight? input, bool cursorShown)
     {
-        if (input is null || !frame.CursorVisible || input.StartRow < 0 || input.StartRow > frame.CursorY || frame.CursorY >= _cells.Count)
+        if (input is null || !cursorShown || input.StartRow < 0 || input.StartRow > frame.CursorY || frame.CursorY >= _cells.Count)
         {
             Unpaint();
             return;

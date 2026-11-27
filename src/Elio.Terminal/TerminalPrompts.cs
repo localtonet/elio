@@ -195,6 +195,19 @@ public sealed partial class TerminalSession
         lock (_terminalGate) _inputActive = false;
     }
 
+    /// <summary>
+    /// Whether a command line is being typed at the shell's prompt: the shell marked where it begins, or for a shell that
+    /// does not, its first character was typed (<see cref="MarkInputStart"/>), and no command has started since. Moving
+    /// through the line with the arrow keys does not end it. A full-screen program is never a prompt.
+    /// </summary>
+    public bool TypingAtPrompt
+    {
+        get
+        {
+            lock (_terminalGate) return _disposed == 0 && _inputActive && !AlternateScreen;
+        }
+    }
+
     /// <summary>Makes a mark follow the cell the cursor is on now.</summary>
     private unsafe bool TrackCursor(ref nint mark)
     {
