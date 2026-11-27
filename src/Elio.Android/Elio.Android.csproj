@@ -4,7 +4,7 @@
     <TargetFramework>net10.0-android</TargetFramework>
     <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
     <ApplicationId>sh.elio.app</ApplicationId>
-    <ApplicationVersion>3</ApplicationVersion>
+    <ApplicationVersion>4</ApplicationVersion>
     <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <!-- The terminal engine is built for these three only; a package for any other would start and then fail. -->
