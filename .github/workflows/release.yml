@@ -62,7 +62,7 @@ jobs:
         continue-on-error: true
         run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" sh build/native.sh android-arm64 android-arm android-x64
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native
           path: native/out
@@ -144,7 +144,7 @@ jobs:
         continue-on-error: true
         run: sh build/package-appimage.sh "${RAW_VERSION#v}" ${{ matrix.rid }} publish dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.rid }}
           path: dist/*
@@ -212,7 +212,7 @@ jobs:
           fi
           xcrun notarytool submit dist/*.zip --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID" --wait
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.rid }}
           path: dist/*
@@ -269,7 +269,7 @@ jobs:
           cp publish/*-Signed.apk "dist/elio-$version-android.apk"
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-android
           path: dist/*
@@ -398,7 +398,7 @@ jobs:
           xcrun altool --upload-app --type ios --file dist/*.ipa --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
 
       # Not named release-*, so that the release job does not put it on the releases page.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios-app
           path: dist/*
@@ -492,7 +492,7 @@ jobs:
       - name: Write the manifests
         run: sh build/package-managers.sh "${GITHUB_REF_NAME#v}" dist manifests
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: package-manifests
           path: manifests
